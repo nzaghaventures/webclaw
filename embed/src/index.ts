@@ -1,162 +1,403 @@
 /**
  * WebClaw Embed Script
- * Entry point: auto-initializes when loaded via <script> tag.
+ * Drop-in <script> tag for any website to add a live AI agent.
  *
  * Usage:
- * <script src="https://gateway.webclaw.dev/embed.js"
- *         data-site-id="your-site-id"
- *         data-gateway="https://gateway.webclaw.dev"></script>
+ *   <script src="https://gateway.webclaw.dev/embed.js"
+ *           data-site-id="YOUR_SITE_ID"
+ *           data-gateway="https://gateway.webclaw.dev">
+ *   </script>
  */
 
 import { GatewayClient } from './gateway-client';
 import { AudioHandler } from './audio';
-import { DOMActionsEngine, DOMAction } from './dom-actions';
-import { Overlay } from './overlay';
+import { executeAction } from './dom-actions';
+import { captureSnapshot } from './dom-snapshot';
 
-class WebClawEmbed {
-  private gateway: GatewayClient;
-  private audio: AudioHandler;
-  private dom: DOMActionsEngine;
-  private overlay: Overlay;
-  private snapshotInterval: number = 0;
+// ========================================
+// Configuration
+// ========================================
 
-  constructor(siteId: string, gatewayUrl: string) {
-    this.gateway = new GatewayClient(gatewayUrl, siteId);
-    this.audio = new AudioHandler();
-    this.dom = new DOMActionsEngine();
-    this.overlay = new Overlay();
+interface WebClawConfig {
+  siteId: string;
+  gatewayUrl: string;
+  position?: 'bottom-right' | 'bottom-left';
+  theme?: 'light' | 'dark';
+  avatarColor?: string;
+}
 
-    this.setupEventHandlers();
-    this.connect();
+function getConfig(): WebClawConfig {
+  const script = document.currentScript as HTMLScriptElement
+    || document.querySelector('script[data-site-id]');
+
+  return {
+    siteId: script?.getAttribute('data-site-id') || 'demo',
+    gatewayUrl: script?.getAttribute('data-gateway') || 'http://localhost:8080',
+    position: (script?.getAttribute('data-position') as any) || 'bottom-right',
+    theme: (script?.getAttribute('data-theme') as any) || 'light',
+    avatarColor: script?.getAttribute('data-color') || '#4285f4',
+  };
+}
+
+// ========================================
+// Overlay UI (Web Component in Shadow DOM)
+// ========================================
+
+const OVERLAY_STYLES = `
+  :host {
+    all: initial;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
 
-  private setupEventHandlers(): void {
-    // Gateway events
+  .webclaw-container {
+    position: fixed;
+    z-index: 999999;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .webclaw-container.bottom-right {
+    bottom: 24px; right: 24px;
+  }
+
+  .webclaw-container.bottom-left {
+    bottom: 24px; left: 24px;
+    align-items: flex-start;
+  }
+
+  /* Chat panel */
+  .webclaw-panel {
+    width: 360px;
+    max-height: 480px;
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08);
+    overflow: hidden;
+    display: none;
+    flex-direction: column;
+    animation: webclaw-slide-up 0.3s ease;
+  }
+
+  .webclaw-panel.open { display: flex; }
+
+  .webclaw-panel-header {
+    padding: 16px;
+    background: var(--wc-color, #4285f4);
+    color: white;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .webclaw-panel-header h3 {
+    margin: 0; font-size: 15px; font-weight: 600;
+  }
+
+  .webclaw-panel-header .status {
+    font-size: 12px; opacity: 0.8;
+  }
+
+  .webclaw-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    min-height: 200px;
+    max-height: 320px;
+  }
+
+  .webclaw-msg {
+    margin-bottom: 12px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.4;
+    max-width: 85%;
+    word-wrap: break-word;
+  }
+
+  .webclaw-msg.agent {
+    background: #f0f0f0;
+    align-self: flex-start;
+    border-bottom-left-radius: 4px;
+  }
+
+  .webclaw-msg.user {
+    background: var(--wc-color, #4285f4);
+    color: white;
+    margin-left: auto;
+    border-bottom-right-radius: 4px;
+  }
+
+  .webclaw-input-row {
+    display: flex;
+    border-top: 1px solid #eee;
+    padding: 8px;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .webclaw-input-row input {
+    flex: 1;
+    border: none;
+    outline: none;
+    padding: 10px;
+    font-size: 14px;
+    background: transparent;
+  }
+
+  .webclaw-btn-mic {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: var(--wc-color, #4285f4);
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+
+  .webclaw-btn-mic:hover { transform: scale(1.05); }
+  .webclaw-btn-mic.active {
+    background: #ea4335;
+    animation: webclaw-pulse-mic 1.5s infinite;
+  }
+
+  /* FAB */
+  .webclaw-fab {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: var(--wc-color, #4285f4);
+    color: white;
+    border: none;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s, box-shadow 0.2s;
+    font-size: 24px;
+  }
+
+  .webclaw-fab:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+  }
+
+  /* Animations */
+  @keyframes webclaw-slide-up {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes webclaw-pulse-mic {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(234,67,53,0.4); }
+    50% { box-shadow: 0 0 0 12px rgba(234,67,53,0); }
+  }
+
+  @keyframes webclaw-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+`;
+
+// Also inject global highlight animation
+const GLOBAL_STYLE = document.createElement('style');
+GLOBAL_STYLE.textContent = `
+  @keyframes webclaw-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+`;
+document.head.appendChild(GLOBAL_STYLE);
+
+// ========================================
+// Main WebClaw Class
+// ========================================
+
+class WebClawEmbed {
+  private config: WebClawConfig;
+  private gateway: GatewayClient;
+  private audio: AudioHandler;
+  private shadow!: ShadowRoot;
+  private panel!: HTMLElement;
+  private messagesEl!: HTMLElement;
+  private isMicActive = false;
+  private isOpen = false;
+
+  constructor(config: WebClawConfig) {
+    this.config = config;
+    this.gateway = new GatewayClient(config.gatewayUrl, config.siteId);
+    this.audio = new AudioHandler();
+
+    this.createUI();
+    this.bindGatewayEvents();
+  }
+
+  private createUI(): void {
+    // Web Component with Shadow DOM to isolate styles
+    const host = document.createElement('webclaw-overlay');
+    this.shadow = host.attachShadow({ mode: 'closed' });
+
+    const style = document.createElement('style');
+    style.textContent = OVERLAY_STYLES;
+    this.shadow.appendChild(style);
+
+    const container = document.createElement('div');
+    container.className = `webclaw-container ${this.config.position}`;
+    container.style.setProperty('--wc-color', this.config.avatarColor!);
+
+    container.innerHTML = `
+      <div class="webclaw-panel">
+        <div class="webclaw-panel-header">
+          <span style="font-size:20px">🤖</span>
+          <div>
+            <h3>WebClaw</h3>
+            <div class="status">Ready to help</div>
+          </div>
+        </div>
+        <div class="webclaw-messages"></div>
+        <div class="webclaw-input-row">
+          <input type="text" placeholder="Type a message..." />
+          <button class="webclaw-btn-mic" title="Hold to talk">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <button class="webclaw-fab" title="Chat with WebClaw">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+        </svg>
+      </button>
+    `;
+
+    this.shadow.appendChild(container);
+    document.body.appendChild(host);
+
+    // Cache references
+    this.panel = container.querySelector('.webclaw-panel')!;
+    this.messagesEl = container.querySelector('.webclaw-messages')!;
+
+    // Event listeners
+    const fab = container.querySelector('.webclaw-fab')!;
+    fab.addEventListener('click', () => this.toggle());
+
+    const input = container.querySelector('input')!;
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && input.value.trim()) {
+        this.sendText(input.value.trim());
+        input.value = '';
+      }
+    });
+
+    const micBtn = container.querySelector('.webclaw-btn-mic')! as HTMLElement;
+    micBtn.addEventListener('click', () => this.toggleMic(micBtn));
+  }
+
+  private bindGatewayEvents(): void {
     this.gateway.on('connected', () => {
-      this.overlay.setState('idle');
-      // Send initial page snapshot
-      const snapshot = this.dom.getPageSnapshot();
-      this.gateway.sendDomSnapshot(snapshot.html, snapshot.url);
-      // Periodic snapshots (every 10s)
-      this.snapshotInterval = window.setInterval(() => {
-        const s = this.dom.getPageSnapshot();
-        this.gateway.sendDomSnapshot(s.html, s.url);
-      }, 10000);
+      this.setStatus('Connected');
+      // Send initial DOM snapshot
+      const snapshot = captureSnapshot();
+      this.gateway.sendDomSnapshot(snapshot, window.location.href);
     });
 
     this.gateway.on('disconnected', () => {
-      this.overlay.setState('connecting');
-      window.clearInterval(this.snapshotInterval);
+      this.setStatus('Reconnecting...');
     });
 
-    // Agent text response
     this.gateway.on('text', (msg) => {
-      console.log('[WebClaw]', msg.text);
-      this.overlay.setState('speaking');
-      // Auto-return to idle after text
-      setTimeout(() => {
-        if (this.overlay) this.overlay.setState('idle');
-      }, 2000);
+      this.addMessage('agent', msg.text as string);
     });
 
-    // Agent audio response
     this.gateway.on('audio', (msg) => {
-      this.overlay.setState('speaking');
       this.audio.playAudio(msg.data as string);
-      // Simulate mouth movement from audio
-      this.overlay.setMouthOpenness(0.6 + Math.random() * 0.4);
-      setTimeout(() => this.overlay.setMouthOpenness(0), 200);
     });
 
-    // Agent DOM action
-    this.gateway.on('action', async (msg) => {
-      this.overlay.setState('executing');
-      const action: DOMAction = {
+    this.gateway.on('action', (msg) => {
+      // Execute DOM action and send result back
+      const result = executeAction({
         action: msg.action as string,
         id: msg.id as string,
-        ...(msg.args as object),
-      };
-
-      const result = await this.dom.execute(action);
+        ...(msg.args as Record<string, unknown> || {}),
+      });
       this.gateway.sendActionResult(result.action_id, result);
-
-      // Send updated snapshot after action
-      await new Promise(r => setTimeout(r, 500));
-      const snapshot = this.dom.getPageSnapshot();
-      this.gateway.sendDomSnapshot(snapshot.html, snapshot.url);
-
-      this.overlay.setState('idle');
+      // Show action feedback
+      this.addMessage('agent', `⚡ ${result.message || result.action_id}`);
     });
-
-    // Mic toggle from overlay
-    this.overlay.onMicToggle = async (active: boolean) => {
-      if (active) {
-        try {
-          await this.audio.startCapture((data) => {
-            this.gateway.sendAudio(data);
-          });
-          this.overlay.setState('listening');
-        } catch (e) {
-          console.error('[WebClaw] Mic access denied:', e);
-          this.overlay.setState('idle');
-        }
-      } else {
-        this.audio.stopCapture();
-        this.overlay.setState('idle');
-      }
-    };
   }
 
-  private async connect(): Promise<void> {
-    this.overlay.setState('connecting');
-    try {
-      await this.gateway.connect();
-    } catch (e) {
-      console.error('[WebClaw] Connection failed:', e);
-      this.overlay.setState('idle');
+  private async toggle(): Promise<void> {
+    this.isOpen = !this.isOpen;
+    this.panel.classList.toggle('open', this.isOpen);
+
+    if (this.isOpen && !this.gateway['ws']) {
+      this.setStatus('Connecting...');
+      try {
+        await this.gateway.connect();
+      } catch {
+        this.setStatus('Connection failed');
+      }
     }
   }
 
-  destroy(): void {
-    window.clearInterval(this.snapshotInterval);
-    this.gateway.disconnect();
-    this.audio.destroy();
-    this.overlay.destroy();
+  private sendText(text: string): void {
+    this.addMessage('user', text);
+    this.gateway.sendText(text);
+  }
+
+  private async toggleMic(btn: HTMLElement): Promise<void> {
+    if (this.isMicActive) {
+      this.audio.stopCapture();
+      btn.classList.remove('active');
+      this.isMicActive = false;
+    } else {
+      try {
+        await this.audio.startCapture((data) => {
+          this.gateway.sendAudio(data);
+        });
+        btn.classList.add('active');
+        this.isMicActive = true;
+      } catch (e) {
+        console.error('[WebClaw] Mic access denied:', e);
+      }
+    }
+  }
+
+  private addMessage(role: 'user' | 'agent', text: string): void {
+    const msg = document.createElement('div');
+    msg.className = `webclaw-msg ${role}`;
+    msg.textContent = text;
+    this.messagesEl.appendChild(msg);
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  private setStatus(text: string): void {
+    const status = this.shadow.querySelector('.status');
+    if (status) status.textContent = text;
   }
 }
 
-// ---- Auto-initialize from script tag ----
+// ========================================
+// Auto-init
+// ========================================
 
 function init(): void {
-  const script = document.currentScript as HTMLScriptElement | null
-    || document.querySelector('script[data-site-id]');
-
-  if (!script) {
-    console.warn('[WebClaw] No script tag with data-site-id found');
-    return;
-  }
-
-  const siteId = script.getAttribute('data-site-id');
-  if (!siteId) {
-    console.warn('[WebClaw] Missing data-site-id attribute');
-    return;
-  }
-
-  const gatewayUrl = script.getAttribute('data-gateway')
-    || script.src.replace(/\/embed\.js.*$/, '').replace(/\/webclaw\.js.*$/, '')
-    || 'http://localhost:8080';
-
-  // Wait for DOM ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      (window as any).__webclaw = new WebClawEmbed(siteId, gatewayUrl);
-    });
+    document.addEventListener('DOMContentLoaded', () => boot());
   } else {
-    (window as any).__webclaw = new WebClawEmbed(siteId, gatewayUrl);
+    boot();
   }
+}
+
+function boot(): void {
+  const config = getConfig();
+  (window as any).__webclaw = new WebClawEmbed(config);
 }
 
 init();
-
-// Export for programmatic use
-export { WebClawEmbed };
