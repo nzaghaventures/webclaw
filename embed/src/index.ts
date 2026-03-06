@@ -11,6 +11,7 @@
 
 import { GatewayClient } from './gateway-client';
 import { AudioHandler } from './audio';
+import { Avatar, AvatarState } from './avatar';
 import { executeAction } from './dom-actions';
 import { captureSnapshot } from './dom-snapshot';
 
@@ -225,6 +226,7 @@ class WebClawEmbed {
   private shadow!: ShadowRoot;
   private panel!: HTMLElement;
   private messagesEl!: HTMLElement;
+  private avatar: Avatar | null = null;
   private isMicActive = false;
   private isOpen = false;
 
@@ -253,7 +255,7 @@ class WebClawEmbed {
     container.innerHTML = `
       <div class="webclaw-panel">
         <div class="webclaw-panel-header">
-          <span style="font-size:20px">🤖</span>
+          <canvas id="wc-avatar" width="36" height="36" style="border-radius:50%;"></canvas>
           <div>
             <h3>WebClaw</h3>
             <div class="status">Ready to help</div>
@@ -270,9 +272,7 @@ class WebClawEmbed {
         </div>
       </div>
       <button class="webclaw-fab" title="Chat with WebClaw">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
-        </svg>
+        <canvas id="wc-fab-avatar" width="40" height="40" style="border-radius:50%;"></canvas>
       </button>
     `;
 
@@ -286,6 +286,12 @@ class WebClawEmbed {
     // Event listeners
     const fab = container.querySelector('.webclaw-fab')!;
     fab.addEventListener('click', () => this.toggle());
+
+    // Initialize avatar on FAB
+    const fabCanvas = container.querySelector('#wc-fab-avatar') as HTMLCanvasElement;
+    if (fabCanvas) {
+      this.avatar = new Avatar(fabCanvas, this.config.avatarColor!, 40);
+    }
 
     const input = container.querySelector('input')!;
     input.addEventListener('keydown', (e) => {
@@ -302,24 +308,32 @@ class WebClawEmbed {
   private bindGatewayEvents(): void {
     this.gateway.on('connected', () => {
       this.setStatus('Connected');
-      // Send initial DOM snapshot
+      this.avatar?.setState('idle');
       const snapshot = captureSnapshot();
       this.gateway.sendDomSnapshot(snapshot, window.location.href);
     });
 
     this.gateway.on('disconnected', () => {
       this.setStatus('Reconnecting...');
+      this.avatar?.setState('idle');
     });
 
     this.gateway.on('text', (msg) => {
       this.addMessage('agent', msg.text as string);
+      this.avatar?.setState('speaking');
+      // Return to idle after a delay
+      setTimeout(() => this.avatar?.setState('idle'), 2000);
     });
 
     this.gateway.on('audio', (msg) => {
+      this.avatar?.setState('speaking');
       this.audio.playAudio(msg.data as string);
+      // Audio playback will last a while; return to idle after
+      setTimeout(() => this.avatar?.setState('idle'), 3000);
     });
 
     this.gateway.on('action', (msg) => {
+      this.avatar?.setState('acting');
       // Execute DOM action and send result back
       const result = executeAction({
         action: msg.action as string,
@@ -329,6 +343,7 @@ class WebClawEmbed {
       this.gateway.sendActionResult(result.action_id, result);
       // Show action feedback
       this.addMessage('agent', `⚡ ${result.message || result.action_id}`);
+      setTimeout(() => this.avatar?.setState('idle'), 1000);
     });
   }
 
@@ -356,6 +371,7 @@ class WebClawEmbed {
       this.audio.stopCapture();
       btn.classList.remove('active');
       this.isMicActive = false;
+      this.avatar?.setState('idle');
     } else {
       try {
         await this.audio.startCapture((data) => {
@@ -363,6 +379,7 @@ class WebClawEmbed {
         });
         btn.classList.add('active');
         this.isMicActive = true;
+        this.avatar?.setState('listening');
       } catch (e) {
         console.error('[WebClaw] Mic access denied:', e);
       }

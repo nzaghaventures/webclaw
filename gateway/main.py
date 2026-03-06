@@ -228,57 +228,57 @@ async def websocket_endpoint(
 
     async def upstream_task() -> None:
         """Receive from WebSocket, forward to LiveRequestQueue."""
-        while True:
-            message = await websocket.receive()
+        try:
+            while True:
+                message = await websocket.receive()
 
-            if "bytes" in message:
-                # Raw PCM audio
-                audio_data = message["bytes"]
-                audio_blob = types.Blob(
-                    mime_type="audio/pcm;rate=16000", data=audio_data,
-                )
-                live_request_queue.send_realtime(audio_blob)
-
-            elif "text" in message:
-                text_data = message["text"]
-                try:
-                    msg = json.loads(text_data)
-                except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON from client: {text_data[:100]}")
-                    continue
-
-                msg_type = msg.get("type", "")
-
-                if msg_type == "text":
-                    content = types.Content(
-                        parts=[types.Part(text=msg["text"])]
+                if "bytes" in message:
+                    # Raw PCM audio
+                    audio_data = message["bytes"]
+                    audio_blob = types.Blob(
+                        mime_type="audio/pcm;rate=16000", data=audio_data,
                     )
-                    live_request_queue.send_content(content)
+                    live_request_queue.send_realtime(audio_blob)
 
-                elif msg_type == "dom_snapshot":
-                    # Page snapshot for visual understanding
-                    snapshot_text = f"[Current Page: {msg.get('url', 'unknown')}]\n{msg.get('html', '')}"
-                    content = types.Content(
-                        parts=[types.Part(text=snapshot_text)]
-                    )
-                    live_request_queue.send_content(content)
+                elif "text" in message:
+                    text_data = message["text"]
+                    try:
+                        msg = json.loads(text_data)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON from client: {text_data[:100]}")
+                        continue
 
-                elif msg_type == "image":
-                    # Screenshot for visual understanding
-                    image_data = base64.b64decode(msg["data"])
-                    image_blob = types.Blob(
-                        mime_type=msg.get("mimeType", "image/jpeg"),
-                        data=image_data,
-                    )
-                    live_request_queue.send_realtime(image_blob)
+                    msg_type = msg.get("type", "")
 
-                elif msg_type == "dom_result":
-                    # Result of a DOM action executed by embed
-                    result_text = f"[Action Result] {json.dumps(msg.get('result', {}))}"
-                    content = types.Content(
-                        parts=[types.Part(text=result_text)]
-                    )
-                    live_request_queue.send_content(content)
+                    if msg_type == "text":
+                        content = types.Content(
+                            parts=[types.Part(text=msg["text"])]
+                        )
+                        live_request_queue.send_content(content)
+
+                    elif msg_type == "dom_snapshot":
+                        snapshot_text = f"[Current Page: {msg.get('url', 'unknown')}]\n{msg.get('html', '')}"
+                        content = types.Content(
+                            parts=[types.Part(text=snapshot_text)]
+                        )
+                        live_request_queue.send_content(content)
+
+                    elif msg_type == "image":
+                        image_data = base64.b64decode(msg["data"])
+                        image_blob = types.Blob(
+                            mime_type=msg.get("mimeType", "image/jpeg"),
+                            data=image_data,
+                        )
+                        live_request_queue.send_realtime(image_blob)
+
+                    elif msg_type == "dom_result":
+                        result_text = f"[Action Result] {json.dumps(msg.get('result', {}))}"
+                        content = types.Content(
+                            parts=[types.Part(text=result_text)]
+                        )
+                        live_request_queue.send_content(content)
+        except WebSocketDisconnect:
+            pass  # Client disconnected; downstream will clean up
 
     async def downstream_task() -> None:
         """Receive ADK events, forward to WebSocket."""
