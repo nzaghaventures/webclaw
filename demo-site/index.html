@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TechVault - Demo Store</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1a1a2e; background: #fafafa; }
+
+    /* Header */
+    header { background: #1a1a2e; color: white; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 1000; }
+    header h1 { font-size: 22px; font-weight: 700; }
+    header h1 span { color: #4A90D9; }
+    nav a { color: #ccc; text-decoration: none; margin-left: 24px; font-size: 14px; transition: color 0.2s; }
+    nav a:hover { color: white; }
+    .cart-btn { background: #4A90D9; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+    .cart-btn:hover { background: #357abd; }
+
+    /* Hero */
+    .hero { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: white; padding: 80px 32px; text-align: center; }
+    .hero h2 { font-size: 48px; margin-bottom: 16px; }
+    .hero p { font-size: 18px; color: #a0aec0; max-width: 600px; margin: 0 auto 32px; }
+    .hero-cta { background: #4A90D9; color: white; border: none; padding: 14px 32px; border-radius: 10px; font-size: 16px; cursor: pointer; transition: transform 0.2s; }
+    .hero-cta:hover { transform: scale(1.05); }
+
+    /* Products */
+    .section { padding: 64px 32px; max-width: 1200px; margin: 0 auto; }
+    .section h3 { font-size: 28px; margin-bottom: 32px; }
+    .products { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px; }
+    .product { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.08); transition: transform 0.2s, box-shadow 0.2s; }
+    .product:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,0,0,0.12); }
+    .product-img { height: 200px; background: #e8edf2; display: flex; align-items: center; justify-content: center; font-size: 48px; }
+    .product-info { padding: 20px; }
+    .product-info h4 { font-size: 18px; margin-bottom: 6px; }
+    .product-info .price { color: #4A90D9; font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+    .product-info .desc { color: #666; font-size: 14px; margin-bottom: 16px; }
+    .add-to-cart { background: #1a1a2e; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; width: 100%; font-size: 14px; transition: background 0.2s; }
+    .add-to-cart:hover { background: #0f3460; }
+
+    /* Features */
+    .features { background: #f0f4f8; padding: 64px 32px; }
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 32px; max-width: 1200px; margin: 0 auto; }
+    .feature { text-align: center; }
+    .feature .icon { font-size: 40px; margin-bottom: 12px; }
+    .feature h4 { margin-bottom: 8px; }
+    .feature p { color: #666; font-size: 14px; }
+
+    /* Contact Form */
+    .contact { max-width: 600px; margin: 0 auto; padding: 64px 32px; }
+    .contact h3 { font-size: 28px; margin-bottom: 24px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 14px; color: #555; margin-bottom: 6px; }
+    .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; font-family: inherit; }
+    .form-group textarea { height: 120px; resize: vertical; }
+    .submit-btn { background: #4A90D9; color: white; border: none; padding: 14px 32px; border-radius: 8px; font-size: 16px; cursor: pointer; }
+
+    /* Footer */
+    footer { background: #1a1a2e; color: #a0aec0; padding: 40px 32px; text-align: center; font-size: 14px; }
+    footer a { color: #4A90D9; text-decoration: none; }
+
+    /* FAQ */
+    .faq { max-width: 800px; margin: 0 auto; padding: 64px 32px; }
+    .faq-item { border-bottom: 1px solid #eee; padding: 16px 0; }
+    .faq-item h4 { cursor: pointer; font-size: 16px; display: flex; justify-content: space-between; }
+    .faq-item p { color: #666; font-size: 14px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Tech<span>Vault</span></h1>
+    <nav>
+      <a href="#products">Products</a>
+      <a href="#features">Why Us</a>
+      <a href="#faq">FAQ</a>
+      <a href="#contact">Contact</a>
+      <button class="cart-btn" id="cart-btn">🛒 Cart (0)</button>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <h2>Next-Gen Tech, Delivered</h2>
+    <p>Premium tech products with free shipping on orders over $50. 30-day hassle-free returns.</p>
+    <button class="hero-cta" onclick="document.getElementById('products').scrollIntoView({behavior:'smooth'})">Shop Now</button>
+  </section>
+
+  <section class="section" id="products">
+    <h3>Featured Products</h3>
+    <div class="products">
+      <div class="product">
+        <div class="product-img">🎧</div>
+        <div class="product-info">
+          <h4>ProSound ANC Headphones</h4>
+          <div class="price">$149.99</div>
+          <div class="desc">Active noise cancellation, 40hr battery, premium comfort</div>
+          <button class="add-to-cart" data-product="ProSound ANC" data-price="149.99">Add to Cart</button>
+        </div>
+      </div>
+
+      <div class="product">
+        <div class="product-img">⌨️</div>
+        <div class="product-info">
+          <h4>MechKey Ultra Keyboard</h4>
+          <div class="price">$89.99</div>
+          <div class="desc">Mechanical switches, RGB backlit, wireless/wired dual mode</div>
+          <button class="add-to-cart" data-product="MechKey Ultra" data-price="89.99">Add to Cart</button>
+        </div>
+      </div>
+
+      <div class="product">
+        <div class="product-img">🖥️</div>
+        <div class="product-info">
+          <h4>UltraWide 34" Monitor</h4>
+          <div class="price">$429.99</div>
+          <div class="desc">3440x1440, 144Hz, USB-C hub, KVM switch</div>
+          <button class="add-to-cart" data-product="UltraWide 34" data-price="429.99">Add to Cart</button>
+        </div>
+      </div>
+
+      <div class="product">
+        <div class="product-img">🖱️</div>
+        <div class="product-info">
+          <h4>ErgoGlide Mouse</h4>
+          <div class="price">$59.99</div>
+          <div class="desc">Ergonomic design, 25K DPI, 70hr battery, silent clicks</div>
+          <button class="add-to-cart" data-product="ErgoGlide" data-price="59.99">Add to Cart</button>
+        </div>
+      </div>
+
+      <div class="product">
+        <div class="product-img">💾</div>
+        <div class="product-info">
+          <h4>SpeedVault 2TB SSD</h4>
+          <div class="price">$179.99</div>
+          <div class="desc">NVMe Gen4, 7000MB/s read, 5-year warranty</div>
+          <button class="add-to-cart" data-product="SpeedVault 2TB" data-price="179.99">Add to Cart</button>
+        </div>
+      </div>
+
+      <div class="product">
+        <div class="product-img">📱</div>
+        <div class="product-info">
+          <h4>ChargePad Pro</h4>
+          <div class="price">$39.99</div>
+          <div class="desc">15W fast wireless charging, MagSafe compatible, LED indicator</div>
+          <button class="add-to-cart" data-product="ChargePad Pro" data-price="39.99">Add to Cart</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="features-grid">
+      <div class="feature">
+        <div class="icon">🚚</div>
+        <h4>Free Shipping</h4>
+        <p>On all orders over $50. Standard delivery in 3-5 business days.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">↩️</div>
+        <h4>30-Day Returns</h4>
+        <p>Not happy? Return any product within 30 days for a full refund.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">🔒</div>
+        <h4>Secure Checkout</h4>
+        <p>256-bit SSL encryption. We never store your payment details.</p>
+      </div>
+      <div class="feature">
+        <div class="icon">💬</div>
+        <h4>24/7 Support</h4>
+        <p>Got questions? Our AI assistant is always here to help.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="faq" id="faq">
+    <h3>Frequently Asked Questions</h3>
+
+    <div class="faq-item">
+      <h4>What payment methods do you accept? <span>+</span></h4>
+      <p>We accept Visa, Mastercard, American Express, PayPal, Apple Pay, and Google Pay.</p>
+    </div>
+
+    <div class="faq-item">
+      <h4>How long does shipping take? <span>+</span></h4>
+      <p>Standard shipping: 3-5 business days. Express shipping: 1-2 business days ($9.99). Free standard shipping on orders over $50.</p>
+    </div>
+
+    <div class="faq-item">
+      <h4>What is your return policy? <span>+</span></h4>
+      <p>We offer a 30-day hassle-free return policy. Items must be in original packaging and unused condition. We provide free return shipping labels.</p>
+    </div>
+
+    <div class="faq-item">
+      <h4>Do you offer warranty? <span>+</span></h4>
+      <p>All products come with a minimum 1-year manufacturer warranty. Extended warranties available at checkout for select items.</p>
+    </div>
+
+    <div class="faq-item">
+      <h4>Can I track my order? <span>+</span></h4>
+      <p>Yes! Once your order ships, you'll receive a tracking link via email. You can also track orders in your account dashboard.</p>
+    </div>
+  </section>
+
+  <section class="contact" id="contact">
+    <h3>Contact Us</h3>
+    <form id="contact-form">
+      <div class="form-group">
+        <label for="name">Full Name</label>
+        <input type="text" id="name" name="name" placeholder="John Doe">
+      </div>
+      <div class="form-group">
+        <label for="email">Email Address</label>
+        <input type="email" id="email" name="email" placeholder="john@example.com">
+      </div>
+      <div class="form-group">
+        <label for="subject">Subject</label>
+        <select id="subject" name="subject">
+          <option value="">Select a topic...</option>
+          <option value="order">Order Inquiry</option>
+          <option value="return">Return Request</option>
+          <option value="technical">Technical Support</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="message">Message</label>
+        <textarea id="message" name="message" placeholder="How can we help?"></textarea>
+      </div>
+      <button type="submit" class="submit-btn">Send Message</button>
+    </form>
+  </section>
+
+  <footer>
+    <p>&copy; 2026 TechVault. All rights reserved. <a href="#">Privacy Policy</a> | <a href="#">Terms of Service</a></p>
+    <p style="margin-top: 8px; font-size: 12px;">Powered by <a href="#">WebClaw</a> AI Assistant</p>
+  </footer>
+
+  <script>
+    // Simple cart logic
+    let cart = [];
+    document.querySelectorAll('.add-to-cart').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const product = btn.dataset.product;
+        const price = parseFloat(btn.dataset.price);
+        cart.push({ product, price });
+        document.getElementById('cart-btn').textContent = `🛒 Cart (${cart.length})`;
+        btn.textContent = '✓ Added!';
+        btn.style.background = '#48c78e';
+        setTimeout(() => {
+          btn.textContent = 'Add to Cart';
+          btn.style.background = '';
+        }, 1500);
+      });
+    });
+
+    // Contact form
+    document.getElementById('contact-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      alert('Message sent! We\'ll get back to you within 24 hours.');
+    });
+  </script>
+
+  <!-- WebClaw Integration -->
+  <script src="/embed.js" data-site-id="demo" data-gateway="http://localhost:8080"></script>
+</body>
+</html>
