@@ -49,7 +49,7 @@ WebClaw uses a **Gateway architecture** (not peer-to-peer) to provide privacy, s
 flowchart TB
     subgraph browser ["User's Browser"]
         direction LR
-        embed["Embed Script\n(Site Agent)\n&lt;script&gt; tag"]
+        embed["Embed Script\n(Site Agent)\nScript Tag"]
         ext["Chrome Extension\n(Personal Agent)\nWorks on any site"]
         site["Target Website\nDOM + Content"]
     end
@@ -91,8 +91,8 @@ sequenceDiagram
     participant GW as Gateway
     participant Gemini as Gemini Live API
 
-    Owner->>Site: Add &lt;script&gt; tag + site_id
-    Owner->>GW: Configure knowledge base,\npersona, permissions
+    Owner->>Site: Add script tag + site_id
+    Owner->>GW: Configure knowledge base,<br/>persona, permissions
 
     User->>Site: Visits website
     Site->>Embed: Embed script loads (19KB)
@@ -110,7 +110,7 @@ sequenceDiagram
     Gemini->>GW: Audio response + tool calls
     GW->>Embed: Audio (PCM 24kHz) + DOM actions
     Embed->>Site: Execute: click "Add to Cart"
-    Embed->>User: Voice: "I've added it to your cart.\nReady to check out?"
+    Embed->>User: Voice: "I've added it to your cart.<br/>Ready to check out?"
 ```
 
 #### Mode 2: Personal Agent (Chrome Extension)
@@ -137,7 +137,7 @@ sequenceDiagram
     GW->>Ext: Audio + DOM action
     Ext->>Any: Scroll to FAQ section
     Ext->>Any: Highlight "Return Policy"
-    Ext->>User: Voice: "Here it is. Returns\naccepted within 30 days."
+    Ext->>User: Voice: "Here it is. Returns<br/>accepted within 30 days."
 ```
 
 ### Context Broker: Asymmetric Privacy
