@@ -77,6 +77,11 @@ app.add_middleware(
 session_service = InMemorySessionService()
 runner = Runner(app_name=APP_NAME, agent=root_agent, session_service=session_service)
 
+# Serve static assets (logos, favicons)
+static_dir = Path(__file__).parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
 # Serve embed script
 embed_dir = Path(__file__).parent.parent / "embed" / "dist"
 if embed_dir.exists():
