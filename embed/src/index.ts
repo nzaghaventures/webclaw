@@ -14,6 +14,8 @@ import { AudioHandler } from './audio';
 import { Avatar, AvatarState } from './avatar';
 import { executeAction } from './dom-actions';
 import { captureSnapshot } from './dom-snapshot';
+import { animateToElement } from './action-visualizer';
+import { captureScreenshot } from './screenshot';
 
 // ========================================
 // Configuration
@@ -311,6 +313,9 @@ class WebClawEmbed {
       this.avatar?.setState('idle');
       const snapshot = captureSnapshot();
       this.gateway.sendDomSnapshot(snapshot, window.location.href);
+
+      // Send initial screenshot for vision context
+      this.sendScreenshotToGateway();
     });
 
     this.gateway.on('disconnected', () => {
@@ -332,8 +337,22 @@ class WebClawEmbed {
       setTimeout(() => this.avatar?.setState('idle'), 3000);
     });
 
-    this.gateway.on('action', (msg) => {
+    this.gateway.on('action', async (msg) => {
       this.avatar?.setState('acting');
+      const selector = (msg.args as Record<string, unknown>)?.selector as string || msg.selector as string || '';
+
+      // Animate avatar flying to target element
+      if (selector) {
+        const fab = this.shadow.querySelector('.webclaw-fab');
+        if (fab) {
+          await animateToElement(
+            fab.getBoundingClientRect(),
+            selector,
+            { color: this.config.avatarColor },
+          );
+        }
+      }
+
       // Execute DOM action and send result back
       const result = executeAction({
         action: msg.action as string,
@@ -397,6 +416,13 @@ class WebClawEmbed {
   private setStatus(text: string): void {
     const status = this.shadow.querySelector('.status');
     if (status) status.textContent = text;
+  }
+
+  private async sendScreenshotToGateway(): Promise<void> {
+    const screenshot = await captureScreenshot();
+    if (screenshot) {
+      this.gateway.sendScreenshot(screenshot.data, screenshot.url);
+    }
   }
 }
 

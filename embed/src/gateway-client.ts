@@ -96,6 +96,11 @@ export class GatewayClient {
 
     // Also emit raw event for custom handling
     this.emit('raw', msg);
+
+    // Negotiation acknowledgment
+    if (msg.type === 'negotiate_ack') {
+      this.emit('negotiate_ack', msg);
+    }
   }
 
   on(event: string, handler: MessageHandler): void {
@@ -132,6 +137,14 @@ export class GatewayClient {
 
   sendImage(base64Data: string, mimeType: string = 'image/jpeg'): void {
     this.send({ type: 'image', data: base64Data, mimeType });
+  }
+
+  sendScreenshot(base64Data: string, url: string, prompt?: string): void {
+    this.send({ type: 'screenshot', data: base64Data, mimeType: 'image/jpeg', url, prompt });
+  }
+
+  sendNegotiate(capabilities: Record<string, unknown>): void {
+    this.send({ type: 'negotiate', capabilities });
   }
 
   private send(data: unknown): void {
