@@ -11,7 +11,7 @@ export interface VisualizerConfig {
 }
 
 const DEFAULT_CONFIG: VisualizerConfig = {
-  color: '#4285f4',
+  color: '#FF4D4D',
   duration: 600,
   trailCount: 8,
 };

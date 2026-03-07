@@ -23,7 +23,7 @@ export class Avatar {
   private analyser: AnalyserNode | null = null;
   private analyserData: Uint8Array | null = null;
 
-  constructor(canvas: HTMLCanvasElement, color: string = '#4285f4', size: number = 64) {
+  constructor(canvas: HTMLCanvasElement, color: string = '#FF4D4D', size: number = 64) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
     this.color = color;
@@ -120,8 +120,8 @@ export class Avatar {
       ctx.beginPath();
       ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
       ctx.fillStyle = this.state === 'listening'
-        ? `rgba(66, 133, 244, ${glowAlpha})`
-        : `rgba(52, 168, 83, ${glowAlpha})`;
+        ? `rgba(0, 229, 204, ${glowAlpha})`
+        : `rgba(255, 77, 77, ${glowAlpha})`;
       ctx.fill();
     }
 
@@ -205,7 +205,7 @@ export class Avatar {
     if (this.state === 'acting') {
       ctx.font = `${s * 0.25}px serif`;
       ctx.textAlign = 'center';
-      ctx.fillStyle = '#fbbc04';
+      ctx.fillStyle = '#FFB800';
       ctx.fillText('⚡', cx + r * 0.8, cy - r * 0.6);
     }
   }

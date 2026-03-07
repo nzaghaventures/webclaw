@@ -38,7 +38,7 @@ function getConfig(): WebClawConfig {
     gatewayUrl: script?.getAttribute('data-gateway') || 'http://localhost:8080',
     position: (script?.getAttribute('data-position') as any) || 'bottom-right',
     theme: (script?.getAttribute('data-theme') as any) || 'light',
-    avatarColor: script?.getAttribute('data-color') || '#4285f4',
+    avatarColor: script?.getAttribute('data-color') || '#FF4D4D',
   };
 }
 
@@ -87,7 +87,7 @@ const OVERLAY_STYLES = `
 
   .webclaw-panel-header {
     padding: 16px;
-    background: var(--wc-color, #4285f4);
+    background: var(--wc-color, #FF4D4D);
     color: white;
     display: flex;
     align-items: center;
@@ -127,7 +127,7 @@ const OVERLAY_STYLES = `
   }
 
   .webclaw-msg.user {
-    background: var(--wc-color, #4285f4);
+    background: var(--wc-color, #FF4D4D);
     color: white;
     margin-left: auto;
     border-bottom-right-radius: 4px;
@@ -154,7 +154,7 @@ const OVERLAY_STYLES = `
     width: 40px; height: 40px;
     border-radius: 50%;
     border: none;
-    background: var(--wc-color, #4285f4);
+    background: var(--wc-color, #FF4D4D);
     color: white;
     cursor: pointer;
     display: flex;
@@ -173,7 +173,7 @@ const OVERLAY_STYLES = `
   .webclaw-fab {
     width: 56px; height: 56px;
     border-radius: 50%;
-    background: var(--wc-color, #4285f4);
+    background: var(--wc-color, #FF4D4D);
     color: white;
     border: none;
     cursor: pointer;
