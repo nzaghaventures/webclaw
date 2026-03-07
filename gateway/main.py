@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 import uuid
 import warnings
 from pathlib import Path
@@ -28,9 +29,20 @@ from agent.agent import root_agent  # noqa: E402
 from context.broker import (  # noqa: E402
     SiteConfig,
     build_agent_context,
+    delete_site_config,
+    get_session_history,
     get_site_config,
+    get_site_stats,
+    list_sessions,
     list_site_configs,
+    record_event,
+    save_session_history,
     set_site_config,
+)
+from storage.firestore import (  # noqa: E402
+    firestore_delete_knowledge,
+    firestore_get_knowledge,
+    firestore_set_knowledge,
 )
 
 # Logging
@@ -50,7 +62,7 @@ APP_NAME = "webclaw-gateway"
 app = FastAPI(
     title="WebClaw Gateway",
     description="Personal Live Agent for Website Operations and Support",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -75,6 +87,11 @@ demo_dir = Path(__file__).parent.parent / "demo-site"
 if demo_dir.exists():
     app.mount("/demo", StaticFiles(directory=demo_dir, html=True), name="demo")
 
+# Serve dashboard
+dashboard_dir = Path(__file__).parent.parent / "dashboard" / "dist"
+if dashboard_dir.exists():
+    app.mount("/dashboard", StaticFiles(directory=dashboard_dir, html=True), name="dashboard")
+
 
 # ========================================
 # REST Endpoints
@@ -84,13 +101,12 @@ if demo_dir.exists():
 @app.get("/health")
 async def health():
     """Health check for Cloud Run."""
-    return {"status": "ok", "service": "webclaw-gateway"}
+    return {"status": "ok", "service": "webclaw-gateway", "version": "0.2.0"}
 
 
 @app.get("/embed.js")
 async def serve_embed_script():
     """Serve the embed script for site integration."""
-    # Check both possible locations
     for path in [
         Path(__file__).parent.parent / "embed" / "dist" / "webclaw.js",
         Path(__file__).parent / "static" / "webclaw.js",
@@ -103,7 +119,10 @@ async def serve_embed_script():
     )
 
 
-# Site config CRUD
+# ========================================
+# Site Config CRUD
+# ========================================
+
 
 class SiteConfigCreate(BaseModel):
     domain: str
@@ -116,6 +135,7 @@ class SiteConfigCreate(BaseModel):
     ]
     restricted_actions: list[str] = []
     escalation_email: str = ""
+    max_actions_per_session: int = 100
 
 
 @app.post("/api/sites")
@@ -124,7 +144,8 @@ async def create_site(config: SiteConfigCreate):
     site_id = str(uuid.uuid4())[:8]
     site_config = SiteConfig(site_id=site_id, **config.model_dump())
     set_site_config(site_config)
-    return {"site_id": site_id, "config": site_config}
+    record_event(site_id, "site_created")
+    return {"site_id": site_id, "config": vars(site_config)}
 
 
 @app.get("/api/sites")
@@ -153,6 +174,100 @@ async def update_site(site_id: str, updates: SiteConfigCreate):
     return {"config": vars(updated)}
 
 
+@app.delete("/api/sites/{site_id}")
+async def delete_site(site_id: str):
+    """Delete a site configuration."""
+    existing = get_site_config(site_id)
+    if not existing:
+        return JSONResponse({"error": "Site not found"}, status_code=404)
+    delete_site_config(site_id)
+    return {"deleted": True, "site_id": site_id}
+
+
+# ========================================
+# Knowledge Base CRUD
+# ========================================
+
+
+class KnowledgeDoc(BaseModel):
+    title: str = ""
+    content: str
+
+
+@app.get("/api/sites/{site_id}/knowledge")
+async def list_knowledge(site_id: str):
+    """List knowledge base documents for a site."""
+    config = get_site_config(site_id)
+    if not config:
+        return JSONResponse({"error": "Site not found"}, status_code=404)
+    docs = firestore_get_knowledge(site_id)
+    return {"documents": docs}
+
+
+@app.post("/api/sites/{site_id}/knowledge")
+async def create_knowledge(site_id: str, doc: KnowledgeDoc):
+    """Add a knowledge base document."""
+    config = get_site_config(site_id)
+    if not config:
+        return JSONResponse({"error": "Site not found"}, status_code=404)
+    doc_id = str(uuid.uuid4())[:8]
+    firestore_set_knowledge(site_id, doc_id, doc.content, doc.title)
+    return {"id": doc_id, "title": doc.title}
+
+
+@app.put("/api/sites/{site_id}/knowledge/{doc_id}")
+async def update_knowledge(site_id: str, doc_id: str, doc: KnowledgeDoc):
+    """Update a knowledge base document."""
+    firestore_set_knowledge(site_id, doc_id, doc.content, doc.title)
+    return {"id": doc_id, "title": doc.title}
+
+
+@app.delete("/api/sites/{site_id}/knowledge/{doc_id}")
+async def delete_knowledge(site_id: str, doc_id: str):
+    """Delete a knowledge base document."""
+    firestore_delete_knowledge(site_id, doc_id)
+    return {"deleted": True}
+
+
+# ========================================
+# Session History
+# ========================================
+
+
+@app.get("/api/sites/{site_id}/sessions")
+async def list_site_sessions(site_id: str, limit: int = 50):
+    """List recent sessions for a site."""
+    config = get_site_config(site_id)
+    if not config:
+        return JSONResponse({"error": "Site not found"}, status_code=404)
+    sessions = list_sessions(site_id, limit=limit)
+    return {"sessions": sessions}
+
+
+@app.get("/api/sites/{site_id}/sessions/{session_id}")
+async def get_session(site_id: str, session_id: str):
+    """Get a session's conversation history."""
+    history = get_session_history(site_id, session_id)
+    if not history:
+        return JSONResponse({"error": "Session not found"}, status_code=404)
+    return {"session": history}
+
+
+# ========================================
+# Analytics
+# ========================================
+
+
+@app.get("/api/sites/{site_id}/stats")
+async def site_stats(site_id: str):
+    """Get analytics counters for a site."""
+    config = get_site_config(site_id)
+    if not config:
+        return JSONResponse({"error": "Site not found"}, status_code=404)
+    stats = get_site_stats(site_id)
+    return {"stats": stats}
+
+
 # ========================================
 # WebSocket: Bidirectional Streaming
 # ========================================
@@ -173,6 +288,8 @@ async def websocket_endpoint(
             {"type": "dom_snapshot", "html": "...", "url": "..."}
             {"type": "dom_result", "action_id": "...", "result": {...}}
             {"type": "image", "data": "base64...", "mimeType": "image/jpeg"}
+            {"type": "screenshot", "data": "base64...", "url": "..."}
+            {"type": "negotiate", "capabilities": {...}}
 
     Protocol (server -> client):
         Text frames (JSON): ADK events including:
@@ -186,6 +303,13 @@ async def websocket_endpoint(
     # Build context for this site
     agent_context = build_agent_context(site_id)
     user_id = f"user_{session_id[:8]}"
+
+    # Track session messages for history
+    session_messages: list[dict] = []
+    session_start = time.time()
+
+    # Record connection
+    record_event(site_id, "sessions_total")
 
     # Determine model capabilities
     model_name = root_agent.model
@@ -239,6 +363,7 @@ async def websocket_endpoint(
                         mime_type="audio/pcm;rate=16000", data=audio_data,
                     )
                     live_request_queue.send_realtime(audio_blob)
+                    record_event(site_id, "audio_frames")
 
                 elif "text" in message:
                     text_data = message["text"]
@@ -255,6 +380,11 @@ async def websocket_endpoint(
                             parts=[types.Part(text=msg["text"])]
                         )
                         live_request_queue.send_content(content)
+                        session_messages.append({
+                            "role": "user", "type": "text",
+                            "text": msg["text"], "ts": time.time(),
+                        })
+                        record_event(site_id, "messages_text")
 
                     elif msg_type == "dom_snapshot":
                         snapshot_text = f"[Current Page: {msg.get('url', 'unknown')}]\n{msg.get('html', '')}"
@@ -262,6 +392,24 @@ async def websocket_endpoint(
                             parts=[types.Part(text=snapshot_text)]
                         )
                         live_request_queue.send_content(content)
+
+                    elif msg_type == "screenshot":
+                        # Vision-based page understanding
+                        image_data = base64.b64decode(msg["data"])
+                        image_blob = types.Blob(
+                            mime_type=msg.get("mimeType", "image/jpeg"),
+                            data=image_data,
+                        )
+                        # Send as content (not realtime) for vision analysis
+                        prompt = msg.get("prompt", "Describe what you see on this webpage.")
+                        content = types.Content(
+                            parts=[
+                                types.Part(text=f"[Screenshot of {msg.get('url', 'current page')}] {prompt}"),
+                                types.Part(inline_data=image_blob),
+                            ]
+                        )
+                        live_request_queue.send_content(content)
+                        record_event(site_id, "screenshots")
 
                     elif msg_type == "image":
                         image_data = base64.b64decode(msg["data"])
@@ -277,6 +425,33 @@ async def websocket_endpoint(
                             parts=[types.Part(text=result_text)]
                         )
                         live_request_queue.send_content(content)
+                        record_event(site_id, "actions_executed")
+
+                    elif msg_type == "negotiate":
+                        # Agent negotiation protocol: Personal Agent announces capabilities
+                        capabilities = msg.get("capabilities", {})
+                        negotiate_text = (
+                            "[Agent Negotiation] A Personal Agent is connecting.\n"
+                            f"Capabilities: {json.dumps(capabilities)}\n"
+                            "Merge the user's personal preferences with site knowledge. "
+                            "Keep user data private from site analytics."
+                        )
+                        content = types.Content(
+                            parts=[types.Part(text=negotiate_text)]
+                        )
+                        live_request_queue.send_content(content)
+                        # Send negotiation acknowledgment back to client
+                        ack = json.dumps({
+                            "type": "negotiate_ack",
+                            "site_permissions": agent_context.get("permissions", {}),
+                            "persona": {
+                                "name": get_site_config(site_id).persona_name if get_site_config(site_id) else "WebClaw",
+                                "voice": get_site_config(site_id).persona_voice if get_site_config(site_id) else "",
+                            },
+                        })
+                        await websocket.send_text(ack)
+                        record_event(site_id, "negotiations")
+
         except WebSocketDisconnect:
             pass  # Client disconnected; downstream will clean up
 
@@ -291,6 +466,25 @@ async def websocket_endpoint(
             event_json = event.model_dump_json(exclude_none=True, by_alias=True)
             await websocket.send_text(event_json)
 
+            # Track agent text responses for session history
+            try:
+                event_data = json.loads(event_json)
+                if event_data.get("content", {}).get("parts"):
+                    for part in event_data["content"]["parts"]:
+                        if "text" in part:
+                            session_messages.append({
+                                "role": "agent", "type": "text",
+                                "text": part["text"], "ts": time.time(),
+                            })
+                if event_data.get("outputTranscription"):
+                    session_messages.append({
+                        "role": "agent", "type": "transcription",
+                        "text": event_data["outputTranscription"],
+                        "ts": time.time(),
+                    })
+            except Exception:
+                pass
+
     try:
         await asyncio.gather(upstream_task(), downstream_task())
     except WebSocketDisconnect:
@@ -299,4 +493,18 @@ async def websocket_endpoint(
         logger.error(f"WebSocket error: {e}", exc_info=True)
     finally:
         live_request_queue.close()
-        logger.info(f"Session ended: {session_id}")
+
+        # Save session history to Firestore
+        if session_messages:
+            save_session_history(
+                site_id=site_id,
+                session_id=session_id,
+                user_id=user_id,
+                messages=session_messages,
+                metadata={
+                    "duration_seconds": time.time() - session_start,
+                    "message_count": len(session_messages),
+                },
+            )
+
+        logger.info(f"Session ended: {session_id} ({len(session_messages)} messages)")
