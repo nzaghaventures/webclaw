@@ -131,7 +131,7 @@ Draw visual attention to an element with a glow border and optional tooltip.
 The embed script applies a temporary visual effect:
 
 ```css
-outline: 3px solid #4285f4;
+outline: 3px solid #FF4D4D;
 outline-offset: 2px;
 box-shadow: 0 0 15px rgba(66, 133, 244, 0.5);
 transition: all 0.3s ease;

@@ -85,7 +85,7 @@ HTML `data-*` attributes on the `<script>` tag that control the embed's behavior
 | `data-gateway` | string | `"http://localhost:8080"` | Gateway URL (use `wss://` in production) |
 | `data-position` | string | `"bottom-right"` | Overlay position: `"bottom-right"` or `"bottom-left"` |
 | `data-theme` | string | `"light"` | Color theme: `"light"` or `"dark"` |
-| `data-color` | string | `"#4285f4"` | Primary accent color (hex) |
+| `data-color` | string | `"#FF4D4D"` | Primary accent color (hex) |
 
 **Full example:**
 

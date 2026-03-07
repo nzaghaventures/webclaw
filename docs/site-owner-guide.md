@@ -72,7 +72,7 @@ That is it. WebClaw will appear on your site for all visitors.
 | `data-gateway` | ✅ | `"http://localhost:8080"` | Gateway URL (use `https://` in production) |
 | `data-position` | | `"bottom-right"` | Overlay position: `bottom-right` or `bottom-left` |
 | `data-theme` | | `"light"` | Color theme: `light` or `dark` |
-| `data-color` | | `"#4285f4"` | Primary accent color for avatar glow, buttons, highlights |
+| `data-color` | | `"#FF4D4D"` | Primary accent color for avatar glow, buttons, highlights |
 
 ### Site Configuration Fields
 
