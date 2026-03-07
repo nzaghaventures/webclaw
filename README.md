@@ -558,7 +558,7 @@ EVT: ['turnComplete', ...]
 | Bonus | Points | Status |
 |:------|:------:|:------:|
 | Terraform deployment | +0.2 | ✅ `infra/main.tf` |
-| GDG membership | +0.2 | 🔲 |
+| GDG membership | +0.2 | ✅ |
 | Blog post | +0.6 | 🔲 |
 
 ### Judging Criteria Alignment
@@ -615,7 +615,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**Built for the [Gemini Live Agent Challenge](https://googleai.devpost.com/) by [David Nzagha](https://github.com/zaghadon)**
+**Built for the [Gemini Live Agent Challenge](https://googleai.devpost.com/) by [David Nzagha](https://github.com/zaghadon) and the [Nzagha Ventures](https://nzagha.com) team.**
 
 *WebClaw: Because websites should have agents, not just chat widgets.*
 
