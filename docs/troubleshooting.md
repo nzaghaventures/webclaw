@@ -1,231 +1,91 @@
 # Troubleshooting
 
-Common issues, debugging strategies, and frequently asked questions.
+Common issues, debugging techniques, and frequently asked questions for WebClaw development and production.
+
+## Quick Diagnostics
+
+Run these checks to identify the problem:
+
+```bash
+# 1. Is the gateway running?
+curl http://127.0.0.1:8081/health
+# Expected: {"status":"ok","service":"webclaw-gateway"}
+
+# 2. Is the API key set?
+grep GOOGLE_API_KEY gateway/.env
+# Expected: GOOGLE_API_KEY=AIza...
+
+# 3. Is the embed script built?
+ls -la embed/dist/webclaw.js
+# Expected: 19.6KB file
+
+# 4. Can the gateway serve the embed script?
+curl -I http://127.0.0.1:8081/embed.js
+# Expected: 200 OK, content-type: application/javascript
+
+# 5. Is the demo site config loaded?
+curl http://127.0.0.1:8081/api/sites | python -m json.tool
+# Expected: sites array with "demo" entry
+```
+
+## Gateway Issues
+
+### Gateway won't start
+
+**Symptom:** `ModuleNotFoundError: No module named 'google.adk'`
+
+**Cause:** Virtual environment not activated or dependencies not installed.
+
+**Fix:**
+```bash
+cd gateway
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
 ---
 
-## Common Issues
+**Symptom:** `IndentationError` or `SyntaxError` on startup
 
-### Gateway Won't Start
+**Cause:** Corrupted Python file (usually from a bad edit).
 
-**Symptom:** `uvicorn main:app` fails with an import error.
+**Fix:**
+```bash
+python -c "from main import app; print('OK')"
+# This will show the exact line with the error
+```
 
-**Causes and fixes:**
+---
 
-| Error | Cause | Fix |
+**Symptom:** `Both GOOGLE_API_KEY and GEMINI_API_KEY are set. Using GOOGLE_API_KEY.`
+
+**Cause:** Both environment variables are present.
+
+**Fix:** This is a warning, not an error. The SDK uses `GOOGLE_API_KEY`. Remove `GEMINI_API_KEY` from `.env` if you want to suppress the warning.
+
+### WebSocket connects but no response
+
+**Symptom:** Client connects to WebSocket, sends a message, but receives no agent events.
+
+**Possible causes:**
+
+| Cause | Check | Fix |
 |:------|:------|:----|
-| `ModuleNotFoundError: google.adk` | Dependencies not installed | `pip install -r requirements.txt` |
-| `ModuleNotFoundError: dotenv` | Missing python-dotenv | `pip install python-dotenv` |
-| `IndentationError` | Code formatting issue | Check recent edits to `main.py` |
-| `Address already in use` | Port 8081 occupied | Kill the existing process or use a different port |
-
-**Check the virtual environment:**
-
-```bash
-which python3
-# Should show: .../webclaw/gateway/.venv/bin/python3
-
-source .venv/bin/activate  # If not activated
-```
-
----
-
-### WebSocket Connects Then Immediately Closes
-
-**Symptom:** The embed script connects, then the WebSocket closes within seconds.
-
-**Check the gateway logs:**
-
-```
-google.genai.errors.APIError: 1008 None. models/gemini-2.0-flash-live-001 is not found
-```
-
-**Fix:** The model name is outdated. Update `gateway/agent/agent.py`:
-
-```python
-root_agent = Agent(
-    name="webclaw_agent",
-    model="gemini-2.0-flash-exp-image-generation",  # supports bidiGenerateContent
-    ...
-)
-```
-
-**Other causes:**
-
-| Log Message | Cause | Fix |
-|:-----------|:------|:----|
-| `1008 model not found` | Deprecated model | Update model name (see above) |
-| `403 API key invalid` | Bad API key | Check `gateway/.env` |
-| `429 Rate limited` | Too many requests | Wait and retry, or check quota |
-| `1000 None` | Normal close after session | Expected; not an error |
-
----
-
-### No Audio Playback
-
-**Symptom:** The agent responds with text events but no audio plays.
-
-**Causes:**
-
-1. **Browser autoplay policy.** Most browsers require a user gesture (click) before allowing audio playback. The WebClaw overlay handles this by initializing `AudioContext` on the first user interaction.
-
-2. **No audio response from model.** Check that `response_modalities` includes `"AUDIO"` in the `RunConfig`.
-
-3. **Muted browser tab.** Chrome may auto-mute tabs. Right-click the tab and select "Unmute."
-
-**Debug:** Open DevTools Console and look for:
-```
-[WebClaw] Audio chunk received (15360 bytes)
-[WebClaw] AudioContext state: suspended  ← Problem: needs user gesture
-```
-
----
-
-### Embed Script 404
-
-**Symptom:** `GET /embed.js` returns 404.
-
-**Fix:** Build the embed script:
-
-```bash
-cd embed
-npm install
-npm run build
-# → dist/webclaw.js
-```
-
-The gateway checks for `embed/dist/webclaw.js` relative to `gateway/main.py`.
-
----
-
-### Microphone Not Working
-
-**Symptom:** Clicking the mic button does nothing, or the browser shows no permission prompt.
-
-**Checks:**
-
-1. **HTTPS required.** `getUserMedia()` only works on `https://` or `localhost`. If testing on a non-localhost HTTP URL, the browser will block mic access.
-
-2. **Permission denied.** Click the lock icon in the address bar → Site Settings → Microphone → Allow.
-
-3. **Another app using the mic.** Close other apps that may have the microphone (Zoom, Teams, etc.).
-
-4. **Extension mic permission.** For the Chrome extension, check `chrome://extensions` → WebClaw → Details → Site access → Permissions.
-
----
-
-### Agent Cannot Find Elements
-
-**Symptom:** The agent says "I couldn't find that element" or clicks the wrong thing.
-
-**Causes and fixes:**
-
-| Scenario | Fix |
-|:---------|:----|
-| Element has no ID or ARIA label | Be more specific: "Click the blue button that says Subscribe" |
-| Element is inside an iframe | WebClaw cannot access cross-origin iframes |
-| Element is dynamically loaded | Wait for the page to fully load before asking |
-| Multiple matching elements | Specify position: "Click the first Add to Cart button" |
-| Element is in Shadow DOM | WebClaw cannot access other Shadow DOM trees |
-
----
-
-### CORS Errors
-
-**Symptom:** Browser console shows `Access-Control-Allow-Origin` errors.
-
-**Fix:** Ensure the gateway is running. The gateway allows all origins by default (`allow_origins=["*"]`). If the gateway is down, the browser will show a CORS error instead of a connection error.
-
----
-
-### Extension Not Appearing
-
-**Symptom:** After installing the extension, no overlay appears on pages.
-
-**Checks:**
-
-1. Extension is **enabled** in `chrome://extensions`
-2. Try **Manual mode**: click the WebClaw toolbar icon → "Activate"
-3. Check that the **gateway URL** in extension settings is correct
-4. Look for errors in the **extension console**: `chrome://extensions` → WebClaw → "Inspect views: service worker"
-
----
-
-## Debugging Strategies
-
-### Gateway Side
-
-**Enable debug logging:**
-
-```python
-# In gateway/main.py, change:
-logging.basicConfig(level=logging.DEBUG)
-```
-
-This shows ADK and Gemini SDK internal logs including:
-- Live connection establishment
-- Session resumption handles
-- Token usage
-- Tool call details
-
-**Test with curl:**
-
-```bash
-# Health check
-curl http://localhost:8081/health
-
-# Sites API
-curl http://localhost:8081/api/sites
-
-# Embed script
-curl -I http://localhost:8081/embed.js
-```
-
-### Client Side
-
-**Browser DevTools Console:**
-
-All embed script operations log to the console with `[WebClaw]` prefix.
-
-**Network Tab → WS filter:**
-
-Inspect individual WebSocket frames:
-- Green/outgoing: client messages (text, audio, DOM snapshots)
-- Red/incoming: agent events (audio, text, tool calls)
-
-**Test WebSocket with Python:**
-
-```python
-import asyncio, websockets, json
-
-async def test():
-    async with websockets.connect('ws://localhost:8081/ws/demo/test') as ws:
-        await ws.send(json.dumps({'type': 'text', 'text': 'Hello!'}))
-        async for msg in ws:
-            data = json.loads(msg)
-            if data.get('outputTranscription'):
-                print(f"Agent: {data['outputTranscription']}")
-            if data.get('turnComplete'):
-                break
-
-asyncio.run(test())
-```
-
----
-
-## FAQ
-
-### Which Gemini models work with WebClaw?
-
-Only models that support `bidiGenerateContent` (the Live API streaming method):
-
-| Model | Status |
-|:------|:-------|
-| `gemini-2.0-flash-exp-image-generation` | **Recommended.** Supports text + audio. |
-| `gemini-2.5-flash-native-audio-latest` | Works. Audio-only responses. |
-| `gemini-2.0-flash-live-001` | **Deprecated.** No longer available. |
-
-To check available models:
+| Invalid API key | Gateway logs show `401` or `403` | Verify key at [AI Studio](https://aistudio.google.com/apikey) |
+| Model doesn't support bidi | Logs show `is not found for API version` | Use a model that supports `bidiGenerateContent` (see below) |
+| Rate limited | Logs show `429` | Wait and retry; check API quotas |
+| Network issue | No logs after "Trying to connect to live model" | Check firewall/proxy settings |
+
+**Currently supported bidi models (March 2026):**
+
+| Model | `bidiGenerateContent` | `generateContent` |
+|:------|:---------------------:|:------------------:|
+| `gemini-2.0-flash-exp-image-generation` | ✅ | ✅ |
+| `gemini-2.5-flash-native-audio-latest` | ✅ | ❌ |
+| `gemini-2.5-flash-native-audio-preview-09-2025` | ✅ | ❌ |
+| `gemini-2.5-flash-native-audio-preview-12-2025` | ✅ | ❌ |
+
+To check available models programmatically:
 
 ```python
 from google import genai
@@ -235,45 +95,210 @@ for m in client.models.list():
         print(m.name)
 ```
 
-### Can WebClaw work without voice?
+### WebSocket error: "Cannot call receive once a disconnect message has been received"
 
-Yes. Text-only mode works out of the box. Users type in the chat panel, and the agent responds with text. Voice (microphone + audio playback) is optional and can be disabled in the extension settings.
+**Symptom:** Error in gateway logs after client disconnects.
 
-### Does WebClaw store user data?
+**Cause:** The upstream task tried to read from the WebSocket after the client disconnected.
 
-No. The gateway passes data through without storing:
-- **Audio:** Streamed to Gemini and discarded. Not logged or saved.
-- **Text messages:** Held in the in-memory session during the connection. Lost on disconnect.
-- **DOM snapshots:** Forwarded to Gemini as context. Not persisted.
+**Fix:** This is handled by the `try/except WebSocketDisconnect` in `upstream_task`. If you see this error, ensure the gateway code has the exception handler:
 
-With Firestore enabled (production), session metadata and site configurations are stored. Audio and DOM snapshots are still not persisted.
-
-### Can I use WebClaw on mobile?
-
-The embed script works on mobile browsers. The Chrome extension is desktop-only (Chrome does not support extensions on mobile). On mobile, the overlay appears as a small button that expands to a chat panel, similar to other chat widgets.
-
-### How much does it cost to run?
-
-For low traffic (< 1000 sessions/month), Cloud Run and Firestore free tiers cover most usage. The main cost is the Gemini API:
-- Free tier: 15 requests/minute, 1M tokens/minute
-- Paid: ~$0.10/1M input tokens, ~$0.40/1M output tokens
-
-A typical session uses 2000-5000 tokens. At $0.40/1M output tokens, 1000 sessions costs roughly $1-2.
-
-### Can multiple sites share one gateway?
-
-Yes. Each site registers with a unique `site_id` and configuration. The gateway routes WebSocket connections to the correct site config based on the `site_id` in the URL path. A single Cloud Run instance can serve hundreds of sites.
-
-### How do I update the knowledge base without restarting?
-
-Use the PUT API endpoint. Changes take effect immediately for new sessions:
-
-```bash
-curl -X PUT http://localhost:8081/api/sites/YOUR_SITE_ID \
-  -H "Content-Type: application/json" \
-  -d '{"domain":"...","knowledge_base":"NEW CONTENT HERE",...}'
+```python
+async def upstream_task() -> None:
+    try:
+        while True:
+            message = await websocket.receive()
+            ...
+    except WebSocketDisconnect:
+        pass
 ```
 
-### Can the agent access data behind login walls?
+### `APIError: 1000 None` or `APIError: 1008 None`
 
-The agent sees whatever the current page shows. If the user is logged in, the agent can see logged-in content. If the page requires authentication, the agent cannot bypass it. The agent operates within the user's browser session with the user's existing cookies and auth state.
+**Symptom:** Error in gateway logs from the Gemini API.
+
+**Cause:** The Gemini Live API session was closed or timed out. Common with:
+- Session ID reuse (connecting with the same session_id twice)
+- Long idle periods (Gemini closes inactive streams)
+- Model deprecation (model no longer available)
+
+**Fix:**
+- Generate unique session IDs per connection (`crypto.randomUUID()`)
+- Implement reconnection logic with new session IDs
+- Check model availability (see model table above)
+
+## Embed Script Issues
+
+### Avatar doesn't appear
+
+**Symptom:** No WebClaw overlay on the page.
+
+**Possible causes:**
+
+| Cause | Check | Fix |
+|:------|:------|:----|
+| Script not loading | Browser DevTools → Network tab | Verify `src` URL is correct |
+| Script 404 | Network shows 404 for `embed.js` | Run `cd embed && npm run build` |
+| JavaScript error | DevTools → Console | Check for errors from `webclaw.js` |
+| CSP blocking | Console shows CSP violation | Add gateway domain to `connect-src` and `script-src` |
+
+### Microphone not working
+
+**Symptom:** No audio captured when mic button is clicked.
+
+**Checks:**
+1. Browser permission: click the lock icon in the URL bar → check microphone permission
+2. HTTPS requirement: `getUserMedia` requires HTTPS (or `localhost`)
+3. Chrome flags: check `chrome://settings/content/microphone`
+4. Other apps: ensure no other app has exclusive mic access
+
+### No audio playback
+
+**Symptom:** Agent responds (events received) but no sound.
+
+**Checks:**
+1. System volume is not muted
+2. Browser tab is not muted (check tab icon)
+3. AudioContext state: some browsers require a user gesture before audio plays
+4. DevTools console: look for `AudioContext was not allowed to start` errors
+
+**Fix for autoplay restrictions:**
+
+```javascript
+// AudioContext must be created/resumed after user interaction
+document.addEventListener('click', () => {
+    audioContext.resume();
+}, { once: true });
+```
+
+### Shadow DOM not isolating styles
+
+**Symptom:** WebClaw overlay looks broken or inherits host page styles.
+
+**Cause:** The Shadow DOM is `open` instead of `closed`, or styles are using `!important` with `::part()`.
+
+**Check:** In DevTools, inspect `<webclaw-overlay>`. The shadow root should show `(closed)`.
+
+## Chrome Extension Issues
+
+### Extension not appearing
+
+**Symptom:** No WebClaw icon in the toolbar after loading.
+
+**Fix:**
+1. Check `chrome://extensions` — is the extension enabled?
+2. Click the puzzle piece icon → pin WebClaw
+3. Check for errors on the extension card
+
+### Content script not injecting
+
+**Symptom:** Extension is installed but the overlay doesn't appear on pages.
+
+**Checks:**
+1. Refresh the page (content scripts only inject on navigation)
+2. Check the extension's service worker for errors
+3. Some pages block content scripts (e.g., `chrome://` pages, Chrome Web Store)
+4. Verify `content_scripts.matches` in `manifest.json` includes the target URL pattern
+
+### Settings not persisting
+
+**Symptom:** Gateway URL resets after closing the popup.
+
+**Fix:** Ensure `chrome.storage.local` is being used (not `localStorage`). The popup's `localStorage` is scoped to the popup window and is destroyed when it closes.
+
+## Production Issues
+
+### Cold start latency
+
+**Symptom:** First request after idle period takes 5-10 seconds.
+
+**Fix:**
+```bash
+gcloud run services update webclaw-gateway \
+  --min-instances=1 \
+  --region us-central1
+```
+
+Setting `min-instances=1` keeps one container warm. Adds ~$15/month in cost.
+
+### WebSocket disconnects on Cloud Run
+
+**Symptom:** WebSocket connections drop after ~10 minutes.
+
+**Cause:** Cloud Run default request timeout is 300 seconds (5 minutes).
+
+**Fix:**
+```bash
+gcloud run services update webclaw-gateway \
+  --timeout=3600 \
+  --region us-central1
+```
+
+### CORS errors in production
+
+**Symptom:** Browser console shows CORS errors when embed script tries to connect.
+
+**Check:** The gateway allows all origins by default (`allow_origins=["*"]`). If you see CORS errors:
+
+1. Verify the gateway is reachable (not a network/firewall issue masquerading as CORS)
+2. Check that the WebSocket URL uses `wss://` (not `ws://`) on HTTPS pages
+3. Ensure Cloud Run's IAM allows unauthenticated access
+
+## FAQ
+
+### Can I use a different Gemini model?
+
+Yes. Change the `model` parameter in `gateway/agent/agent.py`. The model must support `bidiGenerateContent` for the Live API. See the model table above.
+
+### Can I disable voice and use text only?
+
+Yes. The embed script supports text-only mode. Users can type in the chat panel without enabling the microphone. The agent will respond with both audio and text (the text is displayed in the chat panel regardless of audio playback).
+
+### How much does the Gemini API cost?
+
+Gemini API pricing varies by model and usage. Check [Google AI pricing](https://ai.google.dev/pricing) for current rates. The `gemini-2.0-flash` family is generally the most cost-effective for real-time applications.
+
+### Can I self-host without GCP?
+
+Yes. The gateway is a standard Python FastAPI application. Run it anywhere that supports Docker or Python:
+
+```bash
+cd gateway
+source .venv/bin/activate
+uvicorn main:app --host 0.0.0.0 --port 8080
+```
+
+The only GCP dependency is Firestore (for persistent storage), which is optional in the MVP (uses in-memory storage).
+
+### How do I add my own tools?
+
+Add a new function to `gateway/agent/tools.py` and include it in the `DOM_TOOLS` list:
+
+```python
+def my_custom_tool(param: str) -> dict:
+    """Description of what this tool does.
+
+    Args:
+        param: What this parameter controls.
+    """
+    return {"action": "my_action", "param": param, "status": "pending"}
+
+DOM_TOOLS = [
+    click_element,
+    type_text,
+    ...
+    my_custom_tool,  # Add here
+]
+```
+
+ADK automatically generates the function-calling schema from the function signature and docstring.
+
+### How do I update the embed script on production sites?
+
+The embed script is served from the gateway at `/embed.js`. When you update and rebuild the embed script, all sites using your gateway automatically get the new version on their next page load. No action needed from site owners.
+
+For CDN deployments, use cache-busting versioning:
+
+```html
+<script src="https://cdn.webclaw.dev/embed.js?v=2"></script>
+```

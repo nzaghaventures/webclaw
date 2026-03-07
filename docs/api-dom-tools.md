@@ -1,131 +1,103 @@
 # DOM Tools Reference
 
-WebClaw's agent interacts with web pages through 8 DOM tools registered as function-calling tools with the Gemini model via Google ADK. This document covers each tool's definition, the smart element finder, and the client-side execution engine.
+WebClaw's agent uses eight DOM action tools registered as Gemini function-calling functions. When the agent decides to take an action on the page, it returns a `functionCall` part in its response. The client (embed script or Chrome extension) executes the action and sends the result back.
 
-## Tool Execution Pipeline
+## Tool Overview
 
-When the agent decides to take a page action, the following pipeline executes:
-
-```
-Agent Decision (Gemini)
-    │ functionCall event
-    ▼
-Gateway (main.py downstream_task)
-    │ Serialized as JSON event
-    ▼
-Client WebSocket (gateway-client.ts)
-    │ Event with functionCall part
-    ▼
-DOM Actions Module (dom-actions.ts)
-    │ Smart element finder + action executor
-    ▼
-Target Element (actual DOM)
-    │ Action performed
-    ▼
-Result sent back (dom_result)
-    │
-    ▼
-Agent receives confirmation
-```
+| Tool | Purpose | Risk Level |
+|:-----|:--------|:----------:|
+| [`click_element`](#click_element) | Click buttons, links, tabs, menu items | 🟡 Medium |
+| [`type_text`](#type_text) | Type into input fields and textareas | 🔴 High |
+| [`scroll_to`](#scroll_to) | Scroll to elements or by pixel amount | 🟢 Low |
+| [`navigate_to`](#navigate_to) | Navigate to URLs within the site | 🟡 Medium |
+| [`highlight_element`](#highlight_element) | Draw visual attention to elements | 🟢 Low |
+| [`read_page`](#read_page) | Extract text content from elements | 🟢 Low |
+| [`select_option`](#select_option) | Choose from dropdowns and selects | 🟡 Medium |
+| [`check_checkbox`](#check_checkbox) | Toggle checkboxes on or off | 🟡 Medium |
 
 ## Tool Definitions
 
-Each tool is a Python function in `gateway/agent/tools.py` that returns an action descriptor. The agent calls these via Gemini's function-calling capability.
-
----
-
 ### `click_element`
 
-Click a button, link, tab, menu item, or any clickable element.
-
-**Signature:**
-
-```python
-def click_element(selector: str, description: str = "") -> dict
-```
+Click an element on the page.
 
 **Parameters:**
 
-| Name | Type | Required | Description |
-|:-----|:-----|:---------|:-----------|
-| `selector` | string | Yes | CSS selector or ARIA label to identify the element |
-| `description` | string | No | Human-readable description of what is being clicked |
+| Parameter | Type | Required | Description |
+|:----------|:-----|:--------:|:------------|
+| `selector` | string | ✅ | CSS selector or ARIA label to identify the element |
+| `description` | string | | Human-readable description of what is being clicked |
 
-**Action descriptor:**
+**Return value:**
 
 ```json
 {
   "action": "click",
-  "selector": "#add-to-cart",
-  "description": "Add to Cart button",
+  "selector": ".add-to-cart",
+  "description": "Adding product to cart",
   "status": "pending"
 }
 ```
 
-**Client execution:** Finds the element, calls `element.click()`, returns success/failure.
+**Example agent invocation:**
 
-**Example agent usage:**
-- User: "Add this to my cart"
-- Agent calls: `click_element(selector=".btn-add-cart", description="Add to Cart")`
+```json
+{
+  "functionCall": {
+    "name": "click_element",
+    "args": {
+      "selector": "#checkout-btn",
+      "description": "Proceeding to checkout"
+    }
+  }
+}
+```
 
 ---
 
 ### `type_text`
 
-Type text into an input field, textarea, or contenteditable element.
-
-**Signature:**
-
-```python
-def type_text(selector: str, text: str, clear_first: bool = True) -> dict
-```
+Type text into an input field.
 
 **Parameters:**
 
-| Name | Type | Required | Default | Description |
-|:-----|:-----|:---------|:--------|:-----------|
-| `selector` | string | Yes | — | CSS selector or ARIA label of the input |
-| `text` | string | Yes | — | Text to type |
-| `clear_first` | bool | No | `True` | Clear existing content before typing |
+| Parameter | Type | Required | Default | Description |
+|:----------|:-----|:--------:|:--------|:------------|
+| `selector` | string | ✅ | — | CSS selector or ARIA label of the input element |
+| `text` | string | ✅ | — | The text to type into the field |
+| `clear_first` | boolean | | `true` | Whether to clear existing content before typing |
 
-**Action descriptor:**
+**Return value:**
 
 ```json
 {
   "action": "type",
   "selector": "#email-input",
-  "text": "john@example.com",
+  "text": "user@example.com",
   "clear_first": true,
   "status": "pending"
 }
 ```
 
-**Client execution:** Finds the element, optionally clears it, sets `element.value`, dispatches `input` and `change` events for framework reactivity.
+**Safety note:** The agent's system prompt requires explicit user confirmation before typing personal data.
 
 ---
 
 ### `scroll_to`
 
-Scroll to a specific element or scroll the page by a pixel amount.
-
-**Signature:**
-
-```python
-def scroll_to(selector: str = "", direction: str = "down", amount: int = 300) -> dict
-```
+Scroll the page or scroll to a specific element.
 
 **Parameters:**
 
-| Name | Type | Required | Default | Description |
-|:-----|:-----|:---------|:--------|:-----------|
-| `selector` | string | No | `""` | CSS selector to scroll to. If empty, scrolls the page. |
-| `direction` | string | No | `"down"` | Scroll direction: `"up"` or `"down"` |
-| `amount` | int | No | `300` | Pixels to scroll (only when `selector` is empty) |
+| Parameter | Type | Required | Default | Description |
+|:----------|:-----|:--------:|:--------|:------------|
+| `selector` | string | | `""` | CSS selector to scroll to. If empty, scrolls by amount. |
+| `direction` | string | | `"down"` | `"up"` or `"down"`. Only used when selector is empty. |
+| `amount` | integer | | `300` | Pixels to scroll. Only used when selector is empty. |
 
-**Modes:**
-
-1. **Selector provided:** Uses `element.scrollIntoView({ behavior: 'smooth', block: 'center' })`
-2. **No selector:** Uses `window.scrollBy(0, amount)` (negative for up)
+**Behavior:**
+- If `selector` is provided: uses `element.scrollIntoView({ behavior: 'smooth', block: 'center' })`
+- If `selector` is empty: uses `window.scrollBy(0, amount)` (negative for up)
 
 ---
 
@@ -133,19 +105,13 @@ def scroll_to(selector: str = "", direction: str = "down", amount: int = 300) ->
 
 Navigate to a URL within the current website.
 
-**Signature:**
-
-```python
-def navigate_to(url: str) -> dict
-```
-
 **Parameters:**
 
-| Name | Type | Required | Description |
-|:-----|:-----|:---------|:-----------|
-| `url` | string | Yes | URL or path to navigate to (relative or absolute within the site) |
+| Parameter | Type | Required | Description |
+|:----------|:-----|:--------:|:------------|
+| `url` | string | ✅ | URL or path to navigate to (relative or absolute within the site) |
 
-**Client execution:** Sets `window.location.href`. The agent should only navigate within the current domain. Cross-origin navigation is blocked by the browser's security model.
+**Safety note:** Navigation is constrained to the current site's domain by the agent's system prompt. The client-side executor should also validate the URL before executing.
 
 ---
 
@@ -153,24 +119,25 @@ def navigate_to(url: str) -> dict
 
 Draw visual attention to an element with a glow border and optional tooltip.
 
-**Signature:**
-
-```python
-def highlight_element(selector: str, message: str = "") -> dict
-```
-
 **Parameters:**
 
-| Name | Type | Required | Default | Description |
-|:-----|:-----|:---------|:--------|:-----------|
-| `selector` | string | Yes | — | CSS selector or ARIA label of the element |
-| `message` | string | No | `""` | Tooltip text to show near the element |
+| Parameter | Type | Required | Default | Description |
+|:----------|:-----|:--------:|:--------|:------------|
+| `selector` | string | ✅ | — | CSS selector or ARIA label of the element to highlight |
+| `message` | string | | `""` | Optional tooltip message to show near the element |
 
-**Client execution:** Finds the element, applies a temporary CSS outline/glow effect (e.g., `outline: 3px solid #4285f4; box-shadow: 0 0 10px #4285f4`), optionally creates a tooltip overlay. The highlight auto-removes after 3 seconds.
+**Client-side behavior:**
 
-**Example agent usage:**
-- User: "Where is the search bar?"
-- Agent calls: `highlight_element(selector='input[type="search"]', message="Here's the search bar")`
+The embed script applies a temporary visual effect:
+
+```css
+outline: 3px solid #4285f4;
+outline-offset: 2px;
+box-shadow: 0 0 15px rgba(66, 133, 244, 0.5);
+transition: all 0.3s ease;
+```
+
+The highlight auto-removes after 3 seconds. If a `message` is provided, it appears as a tooltip above the element.
 
 ---
 
@@ -178,153 +145,143 @@ def highlight_element(selector: str, message: str = "") -> dict
 
 Extract and return text content from the page or a specific element.
 
-**Signature:**
-
-```python
-def read_page(selector: str = "body") -> dict
-```
-
 **Parameters:**
 
-| Name | Type | Required | Default | Description |
-|:-----|:-----|:---------|:--------|:-----------|
-| `selector` | string | No | `"body"` | CSS selector of the element to read |
+| Parameter | Type | Required | Default | Description |
+|:----------|:-----|:--------:|:--------|:------------|
+| `selector` | string | | `"body"` | CSS selector of the element to read |
 
-**Client execution:** Finds the element, returns `element.innerText` (trimmed, limited to first 2000 characters).
+**Client-side behavior:**
 
-**Example agent usage:**
-- User: "What does the shipping section say?"
-- Agent calls: `read_page(selector="#shipping-info")`
+Returns `element.textContent.trim()` for the matched element, truncated to a reasonable length for the agent's context window.
 
 ---
 
 ### `select_option`
 
-Choose an option from a `<select>` dropdown.
-
-**Signature:**
-
-```python
-def select_option(selector: str, value: str) -> dict
-```
+Select an option from a dropdown or `<select>` element.
 
 **Parameters:**
 
-| Name | Type | Required | Description |
-|:-----|:-----|:---------|:-----------|
-| `selector` | string | Yes | CSS selector of the `<select>` element |
-| `value` | string | Yes | Option value or visible text to select |
+| Parameter | Type | Required | Description |
+|:----------|:-----|:--------:|:------------|
+| `selector` | string | ✅ | CSS selector of the select/dropdown element |
+| `value` | string | ✅ | The `value` attribute or visible text of the option to select |
 
-**Client execution:** Finds the `<select>`, searches options by `value` attribute first, then by `textContent`. Sets `element.value` and dispatches `change` event.
+**Client-side behavior:**
+
+Tries matching by `option.value` first, then by `option.textContent`. Dispatches a `change` event after selection to trigger form handlers.
 
 ---
 
 ### `check_checkbox`
 
-Toggle a checkbox element.
-
-**Signature:**
-
-```python
-def check_checkbox(selector: str, checked: bool = True) -> dict
-```
+Check or uncheck a checkbox element.
 
 **Parameters:**
 
-| Name | Type | Required | Default | Description |
-|:-----|:-----|:---------|:--------|:-----------|
-| `selector` | string | Yes | — | CSS selector of the checkbox |
-| `checked` | bool | No | `True` | Whether to check (`True`) or uncheck (`False`) |
+| Parameter | Type | Required | Default | Description |
+|:----------|:-----|:--------:|:--------|:------------|
+| `selector` | string | ✅ | — | CSS selector of the checkbox element |
+| `checked` | boolean | | `true` | Whether to check (`true`) or uncheck (`false`) |
 
-**Client execution:** Finds the checkbox, sets `element.checked`, dispatches `change` event.
+**Client-side behavior:**
+
+Sets `element.checked = checked` and dispatches both `click` and `change` events to trigger form handlers.
 
 ---
 
 ## Smart Element Finder
 
-The DOM actions module uses a three-tier element resolution strategy. When the agent provides a selector (which may be a CSS selector, ARIA label, or natural language description), the finder tries each strategy in order:
+When the agent specifies a `selector`, the DOM action executor tries three strategies in order:
 
 ### Strategy 1: CSS Selector
 
 ```javascript
-const element = document.querySelector(selector);
+document.querySelector(selector)
 ```
 
-Direct CSS selector match. Works for selectors like `#buy-btn`, `.product-card:first-child`, `button[data-action="add"]`.
+Direct CSS selector match. Works when the agent has accurate selectors from the DOM snapshot.
 
 ### Strategy 2: ARIA Label
 
 ```javascript
-const element = document.querySelector(`[aria-label="${selector}"]`);
+document.querySelector(`[aria-label="${selector}"]`)
 ```
 
-Matches elements by their accessibility label. Works for selectors like `"Add to Cart"`, `"Close dialog"`, `"Search"`. This is particularly effective because:
-- ARIA labels are designed to be human-readable descriptions
-- The agent naturally generates human-readable descriptions
-- Accessible websites have ARIA labels on interactive elements
+Falls back to ARIA label matching. Useful when the agent references elements by their accessible name (e.g., `"Add to Cart"` instead of `.btn-primary`).
 
-### Strategy 3: Text Content Search
+### Strategy 3: Text Content Match
 
 ```javascript
-const interactiveElements = document.querySelectorAll(
-  'button, a, [role="button"], input[type="submit"], [onclick]'
-);
-for (const el of interactiveElements) {
+// Search through interactive elements
+const elements = document.querySelectorAll('button, a, [role="button"], label, input[type="submit"]');
+for (const el of elements) {
   if (el.textContent.trim().toLowerCase().includes(selector.toLowerCase())) {
     return el;
   }
 }
 ```
 
-Scans all interactive elements for matching text content. This handles natural language selectors like `"Add to Cart"` or `"Sign Up"` even when there are no IDs or ARIA labels.
+Fuzzy matching against the visible text of interactive elements. This is the most flexible strategy and handles natural language references like "the blue Add to Cart button."
 
-### Resolution Order
+### Fallback Behavior
 
-```
-Input: "Add to Cart"
-
-1. document.querySelector("Add to Cart")        → null (not valid CSS)
-2. [aria-label="Add to Cart"]                    → <button aria-label="Add to Cart">
-   └─ FOUND ✓
-
-Input: "#checkout-btn"
-
-1. document.querySelector("#checkout-btn")       → <button id="checkout-btn">
-   └─ FOUND ✓
-
-Input: "Submit Order"
-
-1. document.querySelector("Submit Order")        → null
-2. [aria-label="Submit Order"]                   → null
-3. Scan buttons for text "submit order"          → <button>Submit Order</button>
-   └─ FOUND ✓
-```
-
-### Failure Handling
-
-If all three strategies fail, the action returns a failure result:
+If no element is found by any strategy, the action executor returns an error result:
 
 ```json
 {
-  "action": "click",
   "success": false,
-  "error": "Element not found: #nonexistent-btn",
-  "selector": "#nonexistent-btn"
+  "error": "Element not found",
+  "selector": "the green button",
+  "strategies_tried": ["css", "aria", "text"]
 }
 ```
 
-The agent receives this failure and can:
-- Try a different selector
-- Ask the user for clarification
-- Use `read_page` to understand the current page structure
-- Request a new DOM snapshot
+The agent receives this feedback and can adjust its approach (e.g., ask the user for clarification, try a different selector, or request a fresh DOM snapshot).
 
-## Safety Constraints
+## Action Result Format
 
-The agent's system prompt includes safety rules that apply to all tools:
+After executing any action, the client sends the result back to the gateway:
 
-1. **No payment submission without confirmation.** The agent will ask "Should I submit this payment?" before clicking submit on payment forms.
-2. **No password entry.** The agent will never type into password fields.
-3. **Form confirmation.** Before submitting forms with personal data, the agent confirms with the user.
-4. **Site boundary.** The agent stays within the current website's domain.
-5. **Permission enforcement.** Tools in `restricted_actions` are not available to the agent.
+**Success:**
+
+```json
+{
+  "type": "dom_result",
+  "result": {
+    "success": true,
+    "action": "click",
+    "selector": ".add-to-cart",
+    "message": "Element clicked successfully"
+  }
+}
+```
+
+**Failure:**
+
+```json
+{
+  "type": "dom_result",
+  "result": {
+    "success": false,
+    "action": "click",
+    "selector": ".nonexistent",
+    "error": "Element not found"
+  }
+}
+```
+
+The gateway forwards these results to Gemini as text context, allowing the agent to adapt its behavior based on action outcomes.
+
+## Permission Enforcement
+
+DOM actions are filtered at three levels:
+
+| Level | Enforcement Point | Mechanism |
+|:------|:-------------------|:----------|
+| **Model level** | Agent system prompt | `allowed_actions` and `restricted_actions` injected into prompt |
+| **Broker level** | Context broker | Permissions included in session context |
+| **Client level** | Embed script / Extension | Action executor can validate before execution |
+
+If the model calls a restricted tool despite prompt instructions, the client-side executor should reject it and return an error result.

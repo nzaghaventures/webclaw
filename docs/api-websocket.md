@@ -1,60 +1,57 @@
 # WebSocket Protocol Reference
 
-The WebSocket endpoint at `/ws/{site_id}/{session_id}` provides real-time bidirectional communication between the browser client and the Gemini-powered agent.
+The WebSocket endpoint is the core communication channel between the browser (embed script or Chrome extension) and the WebClaw Gateway. It carries text messages, audio streams, DOM snapshots, and agent responses in a bidirectional, full-duplex connection.
 
-## Connection
-
-### Endpoint
+## Endpoint
 
 ```
-ws://localhost:8081/ws/{site_id}/{session_id}
+ws://{host}:{port}/ws/{site_id}/{session_id}
+wss://{host}/ws/{site_id}/{session_id}    (production)
 ```
 
-**Production (TLS):**
-
-```
-wss://your-gateway.run.app/ws/{site_id}/{session_id}
-```
-
-### Path Parameters
+**Path parameters:**
 
 | Parameter | Type | Description |
-|:----------|:-----|:-----------|
-| `site_id` | string | Registered site identifier (e.g., `demo`, `a1b2c3d4`) |
-| `session_id` | string | Client-generated session identifier. Use a UUID or random string. |
+|:----------|:-----|:------------|
+| `site_id` | string | Registered site identifier (e.g., `"demo"`) |
+| `session_id` | string | Client-generated session ID (e.g., `crypto.randomUUID()`) |
 
-### Connection Lifecycle
+**Example:**
 
 ```
-1. Client opens WebSocket connection
-2. Server accepts and loads SiteConfig
-3. Server creates/retrieves ADK session
-4. Server opens LiveRequestQueue for Gemini bidi streaming
-5. Server injects site context (knowledge base) as initial content
-6. Two concurrent tasks begin:
-   - upstream:   client frames → LiveRequestQueue → Gemini
-   - downstream: Gemini events → ADK Runner → client frames
-7. On disconnect: LiveRequestQueue closed, session persists for resume
+ws://127.0.0.1:8081/ws/demo/550e8400-e29b-41d4-a716-446655440000
 ```
 
-### Session Resumption
+## Connection Lifecycle
 
-The Gemini Live API supports session resumption. When a session is interrupted (network drop, page navigation), the client can reconnect with the same `session_id` and the conversation continues where it left off.
-
-The gateway automatically configures `SessionResumptionConfig`. Resumption handles are sent in downstream events:
-
-```json
-{
-  "sessionResumption": {
-    "handle": "CihieTdtOXp3NnNmcnFycmszY...",
-    "resumable": true
-  }
-}
+```
+Client                                  Gateway                        Gemini
+  │                                       │                              │
+  │──── WebSocket CONNECT ───────────────►│                              │
+  │◄─── 101 Switching Protocols ─────────│                              │
+  │                                       │── Load site config           │
+  │                                       │── Create/resume ADK session  │
+  │                                       │── Open bidi stream ─────────►│
+  │                                       │── Inject site context ──────►│
+  │                                       │                              │
+  │  ═══ Session Active (full duplex) ═══ │ ═══════════════════════════  │
+  │                                       │                              │
+  │──── Binary: PCM audio ──────────────►│── send_realtime() ──────────►│
+  │──── Text: {"type":"text",...} ───────►│── send_content() ──────────►│
+  │──── Text: {"type":"dom_snapshot"} ──►│── send_content() ──────────►│
+  │                                       │                              │
+  │◄─── Text: agent event (audio) ───────│◄── run_live() yields ────────│
+  │◄─── Text: agent event (tool call) ───│◄── function call ────────────│
+  │◄─── Text: agent event (text) ────────│◄── text response ────────────│
+  │                                       │                              │
+  │──── Text: {"type":"dom_result"} ────►│── send_content() ──────────►│
+  │                                       │                              │
+  │──── WebSocket CLOSE ────────────────►│── close LiveRequestQueue     │
+  │                                       │── end session                │
+  └───────────────────────────────────────┘──────────────────────────────┘
 ```
 
----
-
-## Client → Server Messages
+## Client-to-Server Messages
 
 ### Binary Frames: Audio
 
@@ -63,31 +60,18 @@ Raw PCM audio data from the microphone.
 | Property | Value |
 |:---------|:------|
 | Frame type | Binary |
-| Format | PCM 16-bit signed integers |
+| Format | PCM, 16-bit signed integers, little-endian |
 | Sample rate | 16,000 Hz |
-| Channels | Mono |
-| Byte order | Little-endian |
+| Channels | 1 (mono) |
+| Typical frame size | 4096 samples (8192 bytes) |
 
-The embed script's `audio.ts` module captures microphone input via the Web Audio API, converts Float32 samples to Int16, and sends the raw bytes as binary WebSocket frames.
-
-**Example (conceptual):**
-
-```javascript
-// In audio.ts
-const int16 = new Int16Array(floatSamples.length);
-for (let i = 0; i < floatSamples.length; i++) {
-  int16[i] = Math.max(-32768, Math.min(32767, floatSamples[i] * 32768));
-}
-websocket.send(int16.buffer);
-```
+The gateway wraps binary frames as `types.Blob(mime_type="audio/pcm;rate=16000")` and pushes them to the `LiveRequestQueue` via `send_realtime()`.
 
 ### Text Frames: JSON Messages
 
 All text frames are JSON objects with a `type` field.
 
-#### Text Message
-
-User-typed text input.
+#### `text` — User Text Message
 
 ```json
 {
@@ -97,38 +81,31 @@ User-typed text input.
 ```
 
 | Field | Type | Required | Description |
-|:------|:-----|:---------|:-----------|
-| `type` | `"text"` | Yes | Message type identifier |
-| `text` | string | Yes | User's text message |
+|:------|:-----|:--------:|:------------|
+| `type` | `"text"` | ✅ | Message type identifier |
+| `text` | string | ✅ | The user's text message |
 
-#### DOM Snapshot
+Forwarded to Gemini as `types.Content(parts=[types.Part(text=...)])` via `send_content()`.
 
-A token-efficient representation of the current page structure. Sent when the connection opens and when the page changes significantly.
+#### `dom_snapshot` — Page Structure
 
 ```json
 {
   "type": "dom_snapshot",
-  "url": "https://mystore.com/products",
-  "html": "<main><h1>Products</h1><button>Add to Cart</button>...</main>"
+  "url": "https://example.com/products",
+  "html": "<main><h1>Products</h1><button class=\"add-cart\">Add to Cart</button>...</main>"
 }
 ```
 
 | Field | Type | Required | Description |
-|:------|:-----|:---------|:-----------|
-| `type` | `"dom_snapshot"` | Yes | Message type identifier |
-| `url` | string | No | Current page URL |
-| `html` | string | Yes | Simplified DOM (from `dom-snapshot.ts`) |
+|:------|:-----|:--------:|:------------|
+| `type` | `"dom_snapshot"` | ✅ | Message type identifier |
+| `url` | string | | Current page URL |
+| `html` | string | ✅ | Token-efficient DOM representation |
 
-The DOM snapshot is generated by `dom-snapshot.ts`, which:
-- Walks the DOM tree starting from `<body>`
-- Includes only interactive elements (`button`, `a`, `input`, `select`, `textarea`) and semantic elements (`h1`-`h6`, `p`, `li`, `nav`, `main`, `section`, `article`, `form`)
-- Skips `<script>`, `<style>`, `<svg>`, `<noscript>`, hidden elements
-- Limits depth to 3 levels
-- Caps total output at 4000 characters
+The gateway prepends `[Current Page: {url}]` and forwards as text content. The snapshot should be generated by the DOM snapshot serializer (see [Architecture](architecture.md#dom-snapshot-serializer)).
 
-#### Screenshot Image
-
-Base64-encoded screenshot for visual understanding.
+#### `image` — Screenshot
 
 ```json
 {
@@ -139,243 +116,185 @@ Base64-encoded screenshot for visual understanding.
 ```
 
 | Field | Type | Required | Description |
-|:------|:-----|:---------|:-----------|
-| `type` | `"image"` | Yes | Message type identifier |
-| `data` | string | Yes | Base64-encoded image data |
-| `mimeType` | string | No | MIME type (default: `image/jpeg`) |
+|:------|:-----|:--------:|:------------|
+| `type` | `"image"` | ✅ | Message type identifier |
+| `data` | string | ✅ | Base64-encoded image data |
+| `mimeType` | string | | MIME type (default: `"image/jpeg"`) |
 
-#### DOM Action Result
+Base64-decoded and forwarded to Gemini as a `types.Blob` via `send_realtime()`.
 
-Result of a DOM action that the agent requested and the client executed.
+#### `dom_result` — Action Execution Result
 
 ```json
 {
   "type": "dom_result",
   "action_id": "click_12345",
   "result": {
-    "action": "click",
     "success": true,
-    "selector": "#add-to-cart",
-    "element": "button",
-    "text": "Add to Cart"
+    "action": "click",
+    "selector": ".add-to-cart",
+    "message": "Element clicked successfully"
   }
 }
 ```
 
 | Field | Type | Required | Description |
-|:------|:-----|:---------|:-----------|
-| `type` | `"dom_result"` | Yes | Message type identifier |
-| `action_id` | string | No | Correlation ID for the action |
-| `result` | object | Yes | Action execution result |
+|:------|:-----|:--------:|:------------|
+| `type` | `"dom_result"` | ✅ | Message type identifier |
+| `action_id` | string | | Correlation ID for the action |
+| `result` | object | ✅ | Execution result from the DOM action engine |
 
----
+Formatted as `[Action Result] {json}` and forwarded as text content, giving the agent feedback on whether its actions succeeded.
 
-## Server → Client Messages
+## Server-to-Client Messages
 
-Server messages are ADK events serialized as JSON. Each event is a complete `LlmResponse` object from the ADK Runner. The structure varies by event type.
+The gateway forwards raw ADK events as JSON. Each event is the JSON serialization of a Google ADK `LlmResponse` object (with `null` fields excluded).
 
-### Audio Response
+### Event Structure
 
-Agent voice output, encoded as base64 PCM audio inside an `inlineData` part.
+Every event contains some subset of these fields:
 
 ```json
 {
   "content": {
     "parts": [
-      {
-        "inlineData": {
-          "mimeType": "audio/pcm;rate=24000",
-          "data": "AQACAAMA..."
-        }
-      }
+      {"text": "Agent text response"},
+      {"inlineData": {"mimeType": "audio/pcm;rate=24000", "data": "base64..."}},
+      {"functionCall": {"name": "click_element", "args": {"selector": ".btn", "description": "Add to Cart"}}}
     ]
   },
   "partial": true,
-  "invocationId": "...",
-  "author": "webclaw_agent"
-}
-```
-
-| Property | Description |
-|:---------|:-----------|
-| `content.parts[].inlineData.mimeType` | Always `audio/pcm;rate=24000` |
-| `content.parts[].inlineData.data` | Base64-encoded PCM audio (24kHz, 16-bit, mono) |
-| `partial` | `true` while audio is streaming, absent on final chunk |
-
-Audio chunks arrive rapidly during agent speech (typically 10-20 chunks per utterance, each ~10-15KB base64). The client's `audio.ts` module decodes each chunk and queues it for sequential playback.
-
-### Text Response
-
-Agent text output in a content part.
-
-```json
-{
-  "content": {
-    "parts": [
-      {
-        "text": "We sell laptops, smartphones, and accessories."
-      }
-    ]
-  },
-  "author": "webclaw_agent"
-}
-```
-
-### Tool Call (DOM Action)
-
-Agent requesting a DOM action. The client should execute the action and send back a `dom_result`.
-
-```json
-{
-  "content": {
-    "parts": [
-      {
-        "functionCall": {
-          "name": "click_element",
-          "args": {
-            "selector": "#add-to-cart",
-            "description": "Add to Cart button"
-          }
-        }
-      }
-    ]
-  },
-  "author": "webclaw_agent"
-}
-```
-
-Tool call names correspond to the 8 DOM tools defined in `agent/tools.py`:
-
-| Function Name | Arguments |
-|:-------------|:----------|
-| `click_element` | `selector`, `description` |
-| `type_text` | `selector`, `text`, `clear_first` |
-| `scroll_to` | `selector`, `direction`, `amount` |
-| `navigate_to` | `url` |
-| `highlight_element` | `selector`, `message` |
-| `read_page` | `selector` |
-| `select_option` | `selector`, `value` |
-| `check_checkbox` | `selector`, `checked` |
-
-### Output Transcription
-
-Transcription of the agent's audio output (useful for displaying text alongside voice).
-
-```json
-{
-  "outputTranscription": "We sell laptops, smartphones, and accessories. Would you like to see our best sellers?",
-  "author": "webclaw_agent"
-}
-```
-
-Transcription events arrive alongside or slightly after audio chunks. The `partial` field indicates whether the transcription is complete.
-
-### Turn Complete
-
-Signals that the agent has finished responding to the current input.
-
-```json
-{
+  "outputTranscription": "What the agent said (text version)",
   "turnComplete": true,
-  "author": "webclaw_agent"
-}
-```
-
-### Usage Metadata
-
-Token and model usage information for the current turn.
-
-```json
-{
   "modelVersion": "gemini-2.0-flash-exp-image-generation",
-  "usageMetadata": {
-    "promptTokenCount": 1234,
-    "candidatesTokenCount": 567,
-    "totalTokenCount": 1801
-  }
+  "usageMetadata": {...},
+  "invocationId": "...",
+  "author": "webclaw_agent",
+  "id": "...",
+  "timestamp": 1741305012.345
 }
 ```
 
-### Session Resumption
+### Content Parts
 
-Handle for reconnecting to a previously interrupted session.
+Events with `content.parts` contain the agent's output. Parts can be:
+
+#### Text Part
+
+```json
+{"text": "I can help you find that product!"}
+```
+
+The agent's text response. Display in the chat panel.
+
+#### Audio Part
 
 ```json
 {
-  "sessionResumption": {
-    "handle": "CihieTdtOXp3NnNmcnFycmszY...",
-    "resumable": true
+  "inlineData": {
+    "mimeType": "audio/pcm;rate=24000",
+    "data": "base64-encoded PCM audio"
   }
 }
 ```
 
----
+| Property | Value |
+|:---------|:------|
+| Format | PCM, 16-bit signed integers, little-endian |
+| Sample rate | 24,000 Hz |
+| Channels | 1 (mono) |
+| Encoding | Base64 |
+| Typical chunk size | 5,120 - 15,360 base64 characters |
 
-## Event Sequence Example
+Decode from base64, convert to Float32, create an `AudioBuffer`, and play through `AudioContext.destination`.
 
-A typical interaction produces this sequence of server events:
+#### Function Call Part
+
+```json
+{
+  "functionCall": {
+    "name": "click_element",
+    "args": {
+      "selector": ".product-card:nth-child(3) .add-to-cart",
+      "description": "Adding wireless headphones to cart"
+    }
+  }
+}
+```
+
+The agent is requesting a DOM action. The client should:
+1. Execute the action using the DOM action engine
+2. Send the result back as a `dom_result` message
+
+Available function names and their arguments are documented in [DOM Tools](api-dom-tools.md).
+
+### Event Flags
+
+| Field | Type | Meaning |
+|:------|:-----|:--------|
+| `partial` | boolean | `true` if this is a streaming partial response (more coming) |
+| `turnComplete` | boolean | `true` when the agent has finished its current turn |
+| `outputTranscription` | string | Text transcription of the agent's audio output |
+
+### Typical Event Sequence
+
+For a single user message, the gateway sends events in this order:
 
 ```
-Client sends: {"type":"text","text":"What's the return policy?"}
-
-Server sends (in order):
-  1. Audio chunk (partial: true)     ← Agent starts speaking
-  2. Transcription (partial: true)   ← "Our return"
-  3. Audio chunk (partial: true)
-  4. Transcription (partial: true)   ← "Our return policy allows"
-  5. Audio chunk (partial: true)
-  6. ...
-  7. Audio chunk (final)             ← Last audio chunk
-  8. Transcription (final)           ← Full transcription
-  9. Usage metadata                  ← Token counts
-  10. Session resumption             ← Resumption handle
-  11. Turn complete                  ← Agent is done
+1. Audio chunk (partial=true)          # Agent starts speaking
+2. Audio chunk (partial=true)          # ...continues
+3. outputTranscription (partial=true)  # Partial transcript
+4. Audio chunk (partial=true)          # ...continues
+5. Audio chunk (partial=true)          # Last audio
+6. outputTranscription                 # Final transcript
+7. turnComplete=true                   # Turn done
 ```
 
-Total events per turn: typically 15-25, depending on response length.
+If the agent calls a tool:
 
----
+```
+1. functionCall: click_element(...)    # Agent wants to click something
+2. Client executes action
+3. Client sends dom_result
+4. Audio chunk (partial=true)          # Agent speaks about the result
+5. outputTranscription                 # Transcript
+6. turnComplete=true                   # Done
+```
 
 ## Error Handling
 
 ### Connection Errors
 
-If the WebSocket connection fails, the client should implement exponential backoff reconnection:
+| Error | Cause | Client Action |
+|:------|:------|:-------------|
+| `1000` | Normal closure | Reconnect if desired |
+| `1001` | Server going away | Reconnect with backoff |
+| `1006` | Abnormal closure (no close frame) | Reconnect with backoff |
+| `1008` | Policy violation | Check site_id validity |
+| `1011` | Internal server error | Retry after delay |
 
-```javascript
-let retries = 0;
-function reconnect() {
-  const delay = Math.min(1000 * Math.pow(2, retries), 30000);
-  setTimeout(() => {
-    connect();
-    retries++;
-  }, delay);
+### Reconnection Strategy
+
+The embed script should implement exponential backoff:
+
+```
+Attempt 1: 1 second delay
+Attempt 2: 2 seconds
+Attempt 3: 4 seconds
+Attempt 4: 8 seconds
+Attempt 5+: 16 seconds (cap)
+```
+
+Generate a new `session_id` on reconnection to avoid session conflicts.
+
+## Session Affinity
+
+Cloud Run deployments must have **session affinity enabled** to ensure WebSocket connections are routed to the same container instance for the duration of the session. This is configured in the Terraform module:
+
+```hcl
+template {
+  session_affinity = true
 }
 ```
 
-### Gemini API Errors
-
-If the Gemini API returns an error, the gateway logs it and the WebSocket may close. Common errors:
-
-| Code | Meaning | Action |
-|:-----|:--------|:-------|
-| 1000 | Normal closure | Reconnect with same session_id |
-| 1008 | Model not found | Check model name in `agent/agent.py` |
-| 429 | Rate limited | Back off and retry |
-| 500 | Server error | Check gateway logs |
-
-### Disconnect Handling
-
-The gateway handles client disconnects gracefully:
-
-```python
-async def upstream_task():
-    try:
-        while True:
-            message = await websocket.receive()
-            ...
-    except WebSocketDisconnect:
-        pass  # Clean exit
-```
-
-The `LiveRequestQueue` is closed in the `finally` block, ensuring Gemini resources are freed.
+Without session affinity, the WebSocket upgrade request may land on a different instance than subsequent frames, causing connection failures.

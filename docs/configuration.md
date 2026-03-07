@@ -1,81 +1,93 @@
 # Configuration Reference
 
-All configuration options for WebClaw sites, agents, and infrastructure.
-
----
+Complete reference for all configurable aspects of WebClaw: site configurations, agent behavior, embed script attributes, extension settings, and infrastructure parameters.
 
 ## Site Configuration
 
-Site configuration is managed through the REST API (`POST /api/sites`, `PUT /api/sites/{id}`).
+Site configurations define how the WebClaw agent behaves on a specific website. Managed via the REST API (see [REST API Reference](api-rest.md)).
 
 ### Fields
 
-| Field | Type | Default | Required | Description |
-|:------|:-----|:--------|:---------|:-----------|
-| `domain` | string | — | Yes | Website domain for validation |
-| `persona_name` | string | `"WebClaw"` | No | Agent's display name |
-| `persona_voice` | string | `"friendly and helpful"` | No | Voice style description for Gemini |
-| `welcome_message` | string | `"Hi! I'm here to help."` | No | First-connect greeting |
-| `knowledge_base` | string | `""` | No | Free-text knowledge for Q&A |
-| `allowed_actions` | string[] | `["click","type","scroll","navigate","highlight","read","select","check"]` | No | Permitted DOM actions |
-| `restricted_actions` | string[] | `[]` | No | Blocked actions |
-| `escalation_email` | string | `""` | No | Human handoff contact |
-| `max_actions_per_session` | int | `100` | No | Rate limit per session |
+| Field | Type | Default | Description |
+|:------|:-----|:--------|:------------|
+| `site_id` | string | Auto-generated (8 chars) | Unique identifier for the site |
+| `domain` | string | **(required)** | Website domain (e.g., `"yoursite.com"`) |
+| `persona_name` | string | `"WebClaw"` | Agent's display name in greetings and UI |
+| `persona_voice` | string | `"friendly and helpful"` | Natural language description of the agent's voice style |
+| `welcome_message` | string | `"Hi! I'm here to help."` | First message spoken when a user opens the panel |
+| `knowledge_base` | string | `""` | Freeform text: FAQs, product info, policies, documentation |
+| `allowed_actions` | string[] | All 8 actions | DOM operations the agent may perform |
+| `restricted_actions` | string[] | `[]` | DOM operations explicitly blocked (overrides allowed) |
+| `escalation_email` | string | `""` | Email for human support handoff |
+| `max_actions_per_session` | integer | `100` | Maximum DOM actions per WebSocket session |
 
-### Action Values
+### Available Actions
 
-| Value | Description |
-|:------|:-----------|
-| `click` | Click elements (buttons, links, tabs) |
-| `type` | Type into input fields |
-| `scroll` | Scroll page or to elements |
-| `navigate` | Navigate to URLs |
-| `highlight` | Highlight elements with glow effect |
-| `read` | Extract text content |
-| `select` | Choose dropdown options |
-| `check` | Toggle checkboxes |
+The `allowed_actions` and `restricted_actions` fields accept these values:
 
-### Preset Configurations
+| Value | Operation |
+|:------|:----------|
+| `"click"` | Click elements (buttons, links, tabs) |
+| `"type"` | Type text into inputs |
+| `"scroll"` | Scroll to elements or by amount |
+| `"navigate"` | Navigate to URLs |
+| `"highlight"` | Highlight elements with visual effect |
+| `"read"` | Extract text content |
+| `"select"` | Choose dropdown options |
+| `"check"` | Toggle checkboxes |
 
-**Read-only (information agent):**
+### Example Configurations
+
+**Minimal (information-only site):**
+
 ```json
 {
-  "allowed_actions": ["read", "highlight", "scroll"],
-  "restricted_actions": ["click", "type", "navigate", "select", "check"]
+  "domain": "docs.example.com",
+  "allowed_actions": ["read", "highlight", "scroll", "navigate"]
 }
 ```
 
-**No form filling:**
+**E-commerce:**
+
 ```json
 {
+  "domain": "shop.example.com",
+  "persona_name": "ShopBot",
+  "persona_voice": "enthusiastic about products, concise, uses casual language",
+  "welcome_message": "Hey there! Looking for something specific or just browsing?",
+  "knowledge_base": "Products: ... Shipping: ... Returns: ...",
   "allowed_actions": ["click", "scroll", "navigate", "highlight", "read", "select"],
-  "restricted_actions": ["type"]
+  "restricted_actions": ["type"],
+  "max_actions_per_session": 50
 }
 ```
 
-**Full access:**
+**Full-access SaaS:**
+
 ```json
 {
+  "domain": "app.example.com",
+  "persona_name": "AppAssist",
+  "persona_voice": "professional, patient, explains step by step",
+  "knowledge_base": "Feature docs, keyboard shortcuts, common workflows...",
   "allowed_actions": ["click", "type", "scroll", "navigate", "highlight", "read", "select", "check"],
-  "restricted_actions": []
+  "max_actions_per_session": 200
 }
 ```
-
----
 
 ## Embed Script Attributes
 
-HTML attributes on the `<script>` tag that configure the embed script.
+HTML `data-*` attributes on the `<script>` tag that control the embed's behavior.
 
-| Attribute | Default | Description |
-|:----------|:--------|:-----------|
-| `data-site-id` | `"demo"` | Registered site identifier |
-| `data-gateway` | `"http://localhost:8080"` | Gateway URL (HTTP or HTTPS) |
-| `data-position` | `"bottom-right"` | Overlay position: `bottom-right`, `bottom-left` |
-| `data-theme` | `"light"` | Color theme: `light`, `dark` |
-| `data-color` | `"#4285f4"` | Primary accent color (hex) |
+| Attribute | Type | Default | Description |
+|:----------|:-----|:--------|:------------|
+| `data-site-id` | string | `"demo"` | Site identifier (from API registration) |
+| `data-gateway` | string | `"http://localhost:8080"` | Gateway URL (use `wss://` in production) |
+| `data-position` | string | `"bottom-right"` | Overlay position: `"bottom-right"` or `"bottom-left"` |
+| `data-theme` | string | `"light"` | Color theme: `"light"` or `"dark"` |
+| `data-color` | string | `"#4285f4"` | Primary accent color (hex) |
 
-### Example
+**Full example:**
 
 ```html
 <script src="https://gateway.webclaw.dev/embed.js"
@@ -83,170 +95,130 @@ HTML attributes on the `<script>` tag that configure the embed script.
         data-gateway="https://gateway.webclaw.dev"
         data-position="bottom-right"
         data-theme="dark"
-        data-color="#1a1a2e">
+        data-color="#e74c3c">
 </script>
 ```
 
----
-
 ## Chrome Extension Settings
 
-Configured via the extension popup UI.
+Stored in `chrome.storage.local`, configurable via the popup UI.
 
-| Setting | Default | Storage Key | Description |
-|:--------|:--------|:------------|:-----------|
-| Gateway URL | `http://localhost:8081` | `gatewayUrl` | WebClaw Gateway address |
-| Auto-Activate | `false` | `autoActivate` | Activate on every page load |
-| Voice Mode | `true` | `voiceMode` | Enable microphone capture |
-| Send DOM Snapshots | `true` | `sendDomSnapshots` | Send page structure to agent |
+| Key | Type | Default | Description |
+|:----|:-----|:--------|:------------|
+| `gatewayUrl` | string | `"http://localhost:8081"` | Gateway URL to connect to |
+| `autoActivate` | boolean | `false` | Auto-activate on every page load |
+| `voiceMode` | boolean | `true` | Enable microphone and voice responses |
+| `sendDomSnapshots` | boolean | `true` | Send page structure to agent for context |
 
-Settings are stored in `chrome.storage.sync` and persist across browser sessions.
+## Agent System Prompt
 
----
+The agent's core behavior is defined in `gateway/agent/prompts.py`. The system prompt has three layers:
 
-## Gateway Environment Variables
+### Layer 1: Core Identity (Hardcoded)
 
-Set in `gateway/.env` (development) or Cloud Run environment (production).
-
-| Variable | Required | Description |
-|:---------|:---------|:-----------|
-| `GOOGLE_API_KEY` | Yes | Gemini API key. Takes priority when both are set. |
-| `GEMINI_API_KEY` | No | Gemini API key (alternative). Used if `GOOGLE_API_KEY` is not set. |
-| `GOOGLE_GENAI_USE_VERTEXAI` | No | Set to `"TRUE"` to use Vertex AI instead of AI Studio. Default: `"FALSE"`. |
-| `GOOGLE_CLOUD_PROJECT` | No | GCP project ID. Required for Firestore and Vertex AI. |
-
-### Environment File
-
-```bash
-# gateway/.env
-GOOGLE_API_KEY=AIzaSy...
-GEMINI_API_KEY=AIzaSy...
+```
+You are WebClaw, a personal live agent for website operations and support.
 ```
 
-The `.env` file is gitignored. Never commit API keys.
+This layer defines the agent's identity, behavioral guidelines, capabilities, and safety rules. It cannot be overridden by site configuration.
 
----
+### Layer 2: Site Persona (Dynamic)
 
-## Agent Configuration
-
-### Model
-
-Set in `gateway/agent/agent.py`:
-
-```python
-root_agent = Agent(
-    name="webclaw_agent",
-    model="gemini-2.0-flash-exp-image-generation",
-    ...
-)
+```
+On this site, your name is {persona_name}.
+Voice style: {persona_voice}
+When a user first connects, greet them with: "{welcome_message}"
 ```
 
-**Models supporting `bidiGenerateContent`:**
+Injected from the site configuration. Customizes the agent's personality per-site.
 
-| Model | Features |
-|:------|:---------|
-| `gemini-2.0-flash-exp-image-generation` | Text + audio + image generation. Recommended. |
-| `gemini-2.5-flash-native-audio-latest` | Audio-only (no `generateContent`). Best voice quality. |
-| `gemini-2.5-flash-native-audio-preview-09-2025` | Preview version. |
-| `gemini-2.5-flash-native-audio-preview-12-2025` | Preview version. |
+### Layer 3: Site Knowledge (Dynamic)
 
-### System Prompt
+```
+## Site Knowledge Base
+{knowledge_base}
 
-The base system prompt is in `gateway/agent/prompts.py`. Key sections:
+## Allowed Actions on This Site
+You may perform: {allowed_actions}
 
-| Section | Content |
-|:--------|:--------|
-| Identity | "You are WebClaw, a personal live agent..." |
-| Behavior | Conversational, concise, explains actions |
-| Capabilities | See, navigate, fill forms, scroll, read, highlight, search |
-| Rules | No payment without confirmation, no passwords, stay on domain |
+## Restricted Actions
+Do NOT perform: {restricted_actions}
+```
 
-The prompt is extended per-site with knowledge base, persona, and action permissions via `build_site_prompt()`.
+Injected from the site configuration. Provides domain-specific knowledge and action boundaries.
 
-### Run Configuration
+### Safety Rules (Non-Overridable)
 
-Set in `gateway/main.py` when creating `RunConfig`:
+These rules are hardcoded and cannot be modified through configuration:
+
+1. Never submit payment forms or enter passwords without explicit user confirmation
+2. Always confirm before submitting forms with personal data
+3. If you can't find an element, describe what you see and ask for guidance
+4. Stay within the boundaries of the current website
+5. Respect the site owner's configured action permissions
+
+## ADK Agent Configuration
+
+The agent is instantiated in `gateway/agent/agent.py`:
 
 | Parameter | Value | Description |
-|:----------|:------|:-----------|
-| `streaming_mode` | `StreamingMode.BIDI` | Bidirectional streaming (required for Live API) |
+|:----------|:------|:------------|
+| `name` | `"webclaw_agent"` | Agent identifier in ADK |
+| `model` | `"gemini-2.0-flash-exp-image-generation"` | Must support `bidiGenerateContent` |
+| `tools` | `DOM_TOOLS` (8 functions) | Available DOM actions |
+| `instruction` | `WEBCLAW_SYSTEM_PROMPT` | Core system prompt |
+
+### RunConfig (WebSocket Sessions)
+
+| Parameter | Value | Description |
+|:----------|:------|:------------|
+| `streaming_mode` | `StreamingMode.BIDI` | Bidirectional streaming |
 | `response_modalities` | `["AUDIO"]` | Agent responds with audio |
-| `session_resumption` | Enabled | Allows reconnection to interrupted sessions |
-| `input_audio_transcription` | Enabled (native audio models) | Transcribes user speech |
-| `output_audio_transcription` | Enabled (native audio models) | Transcribes agent speech |
+| `session_resumption` | Enabled | Allows session resume on reconnect |
+| `input_audio_transcription` | Enabled (native audio models) | Transcribe user speech |
+| `output_audio_transcription` | Enabled (native audio models) | Transcribe agent speech |
 
----
+## Environment Variables
 
-## Terraform Variables
+### Gateway (`gateway/.env`)
 
-Set in `infra/terraform.tfvars`:
+| Variable | Required | Description |
+|:---------|:--------:|:------------|
+| `GOOGLE_API_KEY` | ✅ | Gemini API key (from [AI Studio](https://aistudio.google.com/apikey)) |
+| `GEMINI_API_KEY` | ⚠️ | Alternative to `GOOGLE_API_KEY`; if both set, `GOOGLE_API_KEY` takes priority |
+| `GOOGLE_CLOUD_PROJECT` | | GCP project ID (auto-set on Cloud Run) |
+| `PORT` | | Server port (default: `8080` on Cloud Run, `8081` local) |
 
-| Variable | Type | Default | Required | Description |
-|:---------|:-----|:--------|:---------|:-----------|
-| `project_id` | string | — | Yes | GCP project ID |
-| `region` | string | `"us-central1"` | No | GCP region |
-| `gemini_api_key` | string (sensitive) | — | Yes | Gemini API key |
+### Terraform (`infra/terraform.tfvars`)
 
-### Example
-
-```hcl
-# terraform.tfvars
-project_id     = "webclaw-prod"
-region         = "us-central1"
-gemini_api_key = "AIzaSy..."
-```
-
----
-
-## DOM Snapshot Configuration
-
-Configured as constants in `embed/src/dom-snapshot.ts`:
-
-| Constant | Value | Description |
-|:---------|:------|:-----------|
-| Max depth | 3 | DOM tree traversal depth limit |
-| Max chars | 4000 | Output character limit |
-| Included tags | `button`, `a`, `input`, `select`, `textarea`, `h1`-`h6`, `p`, `li`, `nav`, `main`, `section`, `article`, `form` | Tags included in snapshot |
-| Excluded tags | `script`, `style`, `svg`, `noscript` | Tags skipped entirely |
-
----
+| Variable | Required | Default | Description |
+|:---------|:--------:|:--------|:------------|
+| `project_id` | ✅ | — | GCP project ID |
+| `region` | | `"us-central1"` | GCP region for all resources |
+| `gemini_api_key` | ✅ | — | Passed to Cloud Run as env var |
 
 ## Audio Configuration
 
-### Microphone Capture (`audio.ts`)
+Audio parameters are fixed to match Gemini Live API requirements:
+
+| Parameter | Capture (Mic) | Playback (Agent) |
+|:----------|:-------------|:-----------------|
+| Sample rate | 16,000 Hz | 24,000 Hz |
+| Bit depth | 16-bit signed | 16-bit signed |
+| Channels | 1 (mono) | 1 (mono) |
+| Encoding | PCM (raw) | PCM (base64 over WebSocket) |
+| Buffer size | 4096 samples | Variable (per chunk) |
+
+These values are not configurable; changing them would break compatibility with the Gemini Live API.
+
+## DOM Snapshot Configuration
+
+The DOM snapshot serializer has fixed parameters optimized for LLM context windows:
 
 | Parameter | Value | Description |
-|:----------|:------|:-----------|
-| Sample rate | 16,000 Hz | Gemini input requirement |
-| Bit depth | 16-bit | PCM signed integers |
-| Channels | Mono | Single channel |
-| Buffer size | 4096 samples | Processing chunk size |
-
-### Audio Playback (`audio.ts`)
-
-| Parameter | Value | Description |
-|:----------|:------|:-----------|
-| Sample rate | 24,000 Hz | Gemini output format |
-| Bit depth | 16-bit | PCM from base64 |
-| Channels | Mono | Single channel |
-
----
-
-## Avatar Configuration (`avatar.ts`)
-
-| Parameter | Value | Description |
-|:----------|:------|:-----------|
-| Canvas size | 48x48 px (FAB), 64x64 px (panel) | Rendering resolution |
-| Frame rate | 60 fps | `requestAnimationFrame` loop |
-| Blink interval | 3-5 seconds | Random interval between eye blinks |
-| Mouth sync | AudioNode or sinusoidal | Real lip-sync when AudioNode connected |
-
-### State Colors
-
-| State | Glow Color | Description |
-|:------|:-----------|:-----------|
-| Idle | None | Subtle breathing animation |
-| Listening | Blue (`#4285f4`) | Mic active, eyes attentive |
-| Speaking | Green (`#34a853`) | Lip-sync, gentle bounce |
-| Thinking | Yellow (`#fbbc05`) | Spinning arc indicator |
-| Acting | Orange (`#ea4335`) | Lightning bolt, executing action |
+|:----------|:------|:------------|
+| Max depth | 3 levels | From `<body>` downward |
+| Max characters | 4,000 | Total output cap |
+| Included tags | Interactive + semantic | `button`, `a`, `input`, `select`, `h1`-`h6`, `nav`, `main`, etc. |
+| Excluded tags | Non-semantic | `script`, `style`, `svg`, `noscript`, `iframe` |
+| Hidden elements | Skipped | `display:none`, `visibility:hidden` |

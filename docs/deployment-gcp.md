@@ -1,39 +1,36 @@
-# GCP Deployment
+# GCP Deployment Guide
 
-Deploy WebClaw to Google Cloud Platform using either the quick deploy script or Terraform for full infrastructure-as-code management.
+Deploy WebClaw to Google Cloud Platform using Cloud Run, Artifact Registry, and Firestore. Two deployment methods are available: a quick shell script for rapid iteration and Terraform for production infrastructure-as-code.
 
 ## Prerequisites
 
-| Requirement | Purpose | Installation |
-|:------------|:--------|:-------------|
-| GCP Account | Cloud hosting | [cloud.google.com](https://cloud.google.com) |
-| `gcloud` CLI | GCP management | [Install guide](https://cloud.google.com/sdk/docs/install) |
-| Docker | Container builds | [docker.com](https://docker.com) |
-| Terraform | Infrastructure-as-code (Option B) | `brew install terraform` |
-| Gemini API Key | AI model access | [AI Studio](https://aistudio.google.com/apikey) |
+| Tool | Installation |
+|:-----|:-------------|
+| Google Cloud CLI (`gcloud`) | [Install Guide](https://cloud.google.com/sdk/docs/install) |
+| Docker | [Install Guide](https://docs.docker.com/get-docker/) |
+| Terraform (Option B only) | [Install Guide](https://developer.hashicorp.com/terraform/install) |
+| A GCP project with billing enabled | [Console](https://console.cloud.google.com/) |
 
-### GCP Setup
+### Initial GCP Setup
 
 ```bash
 # Authenticate
 gcloud auth login
 
-# Create or select a project
-gcloud projects create webclaw-prod --name="WebClaw"
-gcloud config set project webclaw-prod
+# Set your project
+gcloud config set project YOUR_PROJECT_ID
 
-# Enable billing (required for Cloud Run)
-# Visit: https://console.cloud.google.com/billing
-
-# Configure Docker for Artifact Registry
-gcloud auth configure-docker us-central1-docker.pkg.dev
+# Enable required APIs
+gcloud services enable \
+  run.googleapis.com \
+  artifactregistry.googleapis.com \
+  firestore.googleapis.com \
+  cloudbuild.googleapis.com
 ```
-
----
 
 ## Option A: Quick Deploy (Shell Script)
 
-The fastest way to deploy. One command handles everything.
+The fastest path from code to production. One command builds the Docker image, pushes to Artifact Registry, and deploys to Cloud Run.
 
 ```bash
 cd infra
@@ -41,66 +38,59 @@ chmod +x deploy.sh
 ./deploy.sh YOUR_PROJECT_ID us-central1
 ```
 
-### What It Does
-
-1. **Builds** the Docker image from `gateway/Dockerfile`
-2. **Pushes** to Artifact Registry (`us-central1-docker.pkg.dev/PROJECT/webclaw/gateway:latest`)
-3. **Deploys** to Cloud Run with:
-   - Session affinity (required for WebSocket)
-   - 2 vCPUs, 1GB RAM
-   - Auto-scaling 0-10 instances
-   - Public access (unauthenticated)
-4. **Outputs** the public gateway URL
-
-### Set the API Key
-
-After deployment, set the Gemini API key:
+### What `deploy.sh` Does
 
 ```bash
-gcloud run services update webclaw-gateway \
-  --region us-central1 \
-  --set-env-vars "GOOGLE_API_KEY=your_key_here"
+# 1. Create Artifact Registry repository (if needed)
+gcloud artifacts repositories create webclaw \
+  --repository-format=docker \
+  --location=$REGION
+
+# 2. Build Docker image
+docker build -t $REGION-docker.pkg.dev/$PROJECT/webclaw/gateway:latest \
+  ../gateway
+
+# 3. Push to Artifact Registry
+docker push $REGION-docker.pkg.dev/$PROJECT/webclaw/gateway:latest
+
+# 4. Deploy to Cloud Run
+gcloud run deploy webclaw-gateway \
+  --image $REGION-docker.pkg.dev/$PROJECT/webclaw/gateway:latest \
+  --region $REGION \
+  --platform managed \
+  --allow-unauthenticated \
+  --session-affinity \
+  --set-env-vars GOOGLE_API_KEY=$GOOGLE_API_KEY
 ```
 
-Or use Secret Manager (recommended for production):
+### After Deployment
+
+The script outputs the Cloud Run service URL:
+
+```
+Service URL: https://webclaw-gateway-abc123-uc.a.run.app
+```
+
+Test it:
 
 ```bash
-# Create secret
-echo -n "your_key_here" | gcloud secrets create gemini-api-key --data-file=-
-
-# Grant Cloud Run access
-gcloud secrets add-iam-policy-binding gemini-api-key \
-  --member="serviceAccount:$(gcloud iam service-accounts list --format='value(email)' --filter='Cloud Run')" \
-  --role="roles/secretmanager.secretAccessor"
-
-# Update service to use secret
-gcloud run services update webclaw-gateway \
-  --region us-central1 \
-  --set-secrets "GOOGLE_API_KEY=gemini-api-key:latest"
+curl https://webclaw-gateway-abc123-uc.a.run.app/health
 ```
 
-### Verify Deployment
+Update your embed script to use the production URL:
 
-```bash
-# Get the URL
-GATEWAY_URL=$(gcloud run services describe webclaw-gateway \
-  --region us-central1 --format 'value(status.url)')
-
-# Health check
-curl $GATEWAY_URL/health
-# → {"status":"ok","service":"webclaw-gateway"}
-
-# List sites
-curl $GATEWAY_URL/api/sites
+```html
+<script src="https://webclaw-gateway-abc123-uc.a.run.app/embed.js"
+        data-site-id="your_site_id"
+        data-gateway="https://webclaw-gateway-abc123-uc.a.run.app">
+</script>
 ```
 
----
+## Option B: Terraform (Production)
 
-## Option B: Terraform (Recommended)
+Terraform provides reproducible, version-controlled infrastructure with full state management.
 
-Full infrastructure-as-code with reproducible deployments.
-
-### Setup
+### Configuration
 
 ```bash
 cd infra
@@ -110,163 +100,139 @@ cp terraform.tfvars.example terraform.tfvars
 Edit `terraform.tfvars`:
 
 ```hcl
-project_id     = "webclaw-prod"
+project_id     = "your-gcp-project-id"
 region         = "us-central1"
-gemini_api_key = "your_gemini_api_key_here"
+gemini_api_key = "your-gemini-api-key"
 ```
 
 ### Deploy
 
 ```bash
-# Initialize Terraform
 terraform init
-
-# Preview changes
-terraform plan
-
-# Apply
-terraform apply
+terraform plan    # Review changes
+terraform apply   # Apply changes
 ```
 
 ### Resources Created
 
+Terraform provisions the following resources:
+
 | Resource | Type | Purpose |
 |:---------|:-----|:--------|
-| `google_project_service.apis` | API enablement | Enables Cloud Run, Artifact Registry, Firestore, Cloud Build |
-| `google_artifact_registry_repository.webclaw` | Docker registry | Stores gateway container images |
-| `google_firestore_database.webclaw` | Database | Site configs, sessions, knowledge bases (Native mode) |
-| `google_cloud_run_v2_service.gateway` | Compute | Gateway container (auto-scaling 0-10, session affinity) |
-| `google_cloud_run_v2_service_iam_member.public` | IAM | Allows unauthenticated access |
+| `google_artifact_registry_repository` | Artifact Registry | Container image storage |
+| `google_cloud_run_v2_service` | Cloud Run | Gateway hosting |
+| `google_firestore_database` | Firestore | Site configs, sessions (Native mode) |
+| `google_cloud_run_v2_service_iam_member` | IAM | Public access (unauthenticated invocation) |
+| `google_project_service` | API enablement | Required GCP APIs |
 
-### Terraform Outputs
+### Terraform Variables
 
-After `terraform apply`, you will see:
+| Variable | Type | Required | Default | Description |
+|:---------|:-----|:--------:|:--------|:------------|
+| `project_id` | string | ✅ | — | GCP project ID |
+| `region` | string | | `"us-central1"` | GCP region |
+| `gemini_api_key` | string | ✅ | — | Gemini API key |
+| `service_name` | string | | `"webclaw-gateway"` | Cloud Run service name |
+| `max_instances` | number | | `10` | Cloud Run max instance count |
 
-```
-Outputs:
+### Updating the Deployment
 
-gateway_url       = "https://webclaw-gateway-abc123-uc.a.run.app"
-artifact_registry = "us-central1-docker.pkg.dev/webclaw-prod/webclaw"
-```
-
-### Build and Push the Image
-
-Terraform creates the infrastructure but does not build the Docker image. After `terraform apply`:
-
-```bash
-cd ../gateway
-
-# Build
-docker build -t us-central1-docker.pkg.dev/webclaw-prod/webclaw/gateway:latest .
-
-# Push
-docker push us-central1-docker.pkg.dev/webclaw-prod/webclaw/gateway:latest
-
-# Cloud Run will automatically pick up the new image
-```
-
-### Updating
+After code changes:
 
 ```bash
-# Rebuild and push
-docker build -t us-central1-docker.pkg.dev/webclaw-prod/webclaw/gateway:latest .
-docker push us-central1-docker.pkg.dev/webclaw-prod/webclaw/gateway:latest
+# Rebuild and push the container
+cd infra
+./deploy.sh YOUR_PROJECT_ID us-central1
 
-# Redeploy Cloud Run
-gcloud run services update webclaw-gateway --region us-central1
+# Or with Terraform
+terraform apply
 ```
 
-### Teardown
+### Destroying Resources
 
 ```bash
 terraform destroy
 ```
 
-This removes all resources. Data in Firestore will be deleted.
+This removes all provisioned resources. Firestore data is also deleted.
 
----
+## Docker Image
 
-## Cloud Run Configuration
-
-### Container Specification
-
-The `gateway/Dockerfile` builds a production container:
+The gateway's `Dockerfile` builds a production-ready container:
 
 ```dockerfile
 FROM python:3.12-slim
+
 WORKDIR /app
 
+# Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy application code
 COPY . .
+
+# Copy embed script (pre-built)
+COPY ../embed/dist/ /app/static/
+
+# Cloud Run uses PORT env var
+ENV PORT=8080
 EXPOSE 8080
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
-**Important:** Cloud Run requires port 8080 (the default). The Dockerfile's CMD exposes this port. Locally, we use 8081 to avoid conflicts.
+**Build locally:**
 
-### Resource Limits
+```bash
+cd gateway
+docker build -t webclaw-gateway .
+docker run -p 8081:8080 -e GOOGLE_API_KEY=your_key webclaw-gateway
+```
 
-| Setting | Value | Reason |
-|:--------|:------|:-------|
-| CPU | 2 vCPUs | WebSocket handling + ADK agent processing |
-| Memory | 1 GB | Gemini SDK + audio processing buffers |
-| Min instances | 0 | Scale to zero when idle (cost savings) |
-| Max instances | 10 | Handles ~100 concurrent WebSocket sessions |
-| Session affinity | Enabled | WebSocket frames must route to same instance |
+## Cloud Run Configuration
 
 ### Session Affinity
 
-**Critical for WebSocket connections.** Without session affinity, Cloud Run may route subsequent WebSocket frames to different instances, breaking the streaming session.
+WebSocket connections require session affinity so that all frames in a connection are routed to the same container instance. This is enabled in both deployment methods:
 
-Terraform enables this with:
+- **Shell script:** `--session-affinity` flag
+- **Terraform:** `session_affinity = true` in the template
 
-```hcl
-template {
-  session_affinity = true
-}
-```
+### Scaling
 
-The deploy script enables it with:
+| Setting | Default | Description |
+|:--------|:--------|:------------|
+| Min instances | 0 | Scale to zero when idle (cost savings) |
+| Max instances | 10 | Maximum concurrent containers |
+| Concurrency | 80 | Requests per container (each WebSocket = 1) |
+| CPU | 1 | vCPUs per instance |
+| Memory | 512Mi | RAM per instance |
+| Timeout | 300s | Maximum request duration (WebSocket connections) |
+
+For production, consider:
 
 ```bash
-gcloud run deploy ... --session-affinity
+gcloud run services update webclaw-gateway \
+  --min-instances=1 \        # Avoid cold starts
+  --max-instances=50 \       # Handle traffic spikes
+  --concurrency=40 \         # Lower concurrency per instance for WebSocket
+  --timeout=3600 \           # 1-hour WebSocket sessions
+  --cpu=2 \                  # More CPU for audio processing
+  --memory=1Gi
 ```
 
-### Health Check
+### Environment Variables
 
-Cloud Run uses the `/health` endpoint as a startup probe:
+| Variable | Required | Description |
+|:---------|:--------:|:------------|
+| `GOOGLE_API_KEY` | ✅ | Gemini API key |
+| `GOOGLE_CLOUD_PROJECT` | | GCP project (auto-set on Cloud Run) |
+| `PORT` | | Server port (auto-set by Cloud Run, default 8080) |
 
-```hcl
-startup_probe {
-  http_get {
-    path = "/health"
-  }
-  initial_delay_seconds = 5
-  period_seconds        = 10
-}
-```
+### Custom Domain
 
-The gateway returns `{"status":"ok"}` within milliseconds of startup.
-
----
-
-## Embed Script Inclusion
-
-After deployment, the embed script is served from the Cloud Run URL:
-
-```html
-<script src="https://webclaw-gateway-abc123-uc.a.run.app/embed.js"
-        data-site-id="your_site_id"
-        data-gateway="https://webclaw-gateway-abc123-uc.a.run.app">
-</script>
-```
-
-### Custom Domain (Optional)
-
-Map a custom domain to your Cloud Run service:
+Map your domain to the Cloud Run service:
 
 ```bash
 gcloud run domain-mappings create \
@@ -275,48 +241,40 @@ gcloud run domain-mappings create \
   --region us-central1
 ```
 
-Then update DNS records as instructed by gcloud.
+Follow the DNS verification instructions output by the command.
 
----
+## Cost Estimation
 
-## Cost Estimate
+| Component | Free Tier | Estimated Cost (Low Traffic) |
+|:----------|:----------|:-----------------------------|
+| Cloud Run | 2M requests/mo, 360K vCPU-seconds | ~$0-5/mo |
+| Artifact Registry | 500MB storage | ~$0/mo |
+| Firestore | 1GB storage, 50K reads/day | ~$0/mo |
+| Gemini API | Varies by model | Pay-per-use |
 
-### Cloud Run
+For a low-traffic deployment (< 1000 sessions/day), total GCP costs are typically under $10/month excluding Gemini API usage.
 
-| Metric | Free Tier | Beyond Free |
-|:-------|:----------|:-----------|
-| Requests | 2M/month | $0.40/million |
-| CPU | 180,000 vCPU-sec/month | $0.00002400/vCPU-sec |
-| Memory | 360,000 GiB-sec/month | $0.00000250/GiB-sec |
-| Networking | 1 GB/month | $0.12/GB (North America) |
+## Monitoring
 
-### Firestore
+### Cloud Run Logs
 
-| Metric | Free Tier | Beyond Free |
-|:-------|:----------|:-----------|
-| Document reads | 50K/day | $0.036/100K |
-| Document writes | 20K/day | $0.108/100K |
-| Storage | 1 GiB | $0.108/GiB |
+```bash
+gcloud run services logs read webclaw-gateway --region us-central1 --limit 50
+```
 
-### Gemini API
+### Cloud Run Metrics
 
-| Model | Free Tier | Beyond Free |
-|:------|:----------|:-----------|
-| Gemini 2.0 Flash | 15 RPM, 1M TPM | $0.10/1M input tokens, $0.40/1M output tokens |
+View in the [Cloud Console](https://console.cloud.google.com/run):
 
-For a low-traffic deployment (< 1000 sessions/month), total cost is likely **under $5/month** after free tier.
+- Request count and latency
+- Instance count over time
+- Memory and CPU utilization
+- Error rates (4xx, 5xx)
 
----
+### Alerting
 
-## Production Checklist
+Set up alerts for:
 
-- [ ] **API key in Secret Manager** (not environment variable)
-- [ ] **CORS restricted** to registered site domains
-- [ ] **Custom domain** mapped with SSL
-- [ ] **Monitoring** enabled (Cloud Run metrics + logging)
-- [ ] **Alerting** for error rates and latency
-- [ ] **Firestore** replacing in-memory session store
-- [ ] **Rate limiting** per IP and per session
-- [ ] **WebSocket authentication** for registered sites
-- [ ] **Backup** for Firestore data
-- [ ] **Load testing** with concurrent WebSocket connections
+- Error rate > 5% over 5 minutes
+- Instance count at max (scaling limit reached)
+- Latency p99 > 5 seconds

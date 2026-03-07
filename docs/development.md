@@ -1,320 +1,275 @@
 # Local Development
 
-This guide covers the development setup, build pipeline, project structure, and testing workflow for contributing to WebClaw.
+This guide covers setting up a complete WebClaw development environment: gateway backend, embed script with hot reload, Chrome extension debugging, and end-to-end testing.
 
-## Development Setup
+## Prerequisites
 
-### System Requirements
+| Tool | Version | Check |
+|:-----|:--------|:------|
+| Python | 3.10+ | `python --version` |
+| Node.js | 18+ | `node --version` |
+| npm | 9+ | `npm --version` |
+| Chrome | Latest | For extension testing |
+| Git | Any | `git --version` |
 
-| Tool | Minimum Version | Installation |
-|:-----|:---------------|:-------------|
-| Python | 3.10 | `brew install python@3.14` or [python.org](https://python.org) |
-| Node.js | 18 | `nvm install 18` or [nodejs.org](https://nodejs.org) |
-| npm | 9 | Comes with Node.js |
-| Git | 2.x | `brew install git` or system default |
-
-### Clone and Install
+## Repository Setup
 
 ```bash
-# Clone
 git clone https://github.com/AfrexAI/webclaw.git
 cd webclaw
+```
 
-# Gateway dependencies
+## Gateway Development
+
+### Environment Setup
+
+```bash
 cd gateway
-python3 -m venv .venv
+
+# Create virtual environment
+python -m venv .venv
 source .venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
-cd ..
 
-# Embed script dependencies
-cd embed
-npm install
-cd ..
+# Configure environment
+cp .env.example .env
+# Edit .env: add GOOGLE_API_KEY
 ```
 
-### Environment Configuration
+### Dependencies
 
-```bash
-# Gateway environment
-cat > gateway/.env << 'EOF'
-GOOGLE_API_KEY=your_gemini_api_key_here
-GEMINI_API_KEY=your_gemini_api_key_here
-EOF
-```
-
-Get a free Gemini API key at [AI Studio](https://aistudio.google.com/apikey).
-
-> **Note:** When both `GOOGLE_API_KEY` and `GEMINI_API_KEY` are set, the Google SDK prioritizes `GOOGLE_API_KEY`. Set both for compatibility.
-
-## Running Locally
-
-### Start the Gateway
-
-```bash
-cd gateway
-source .venv/bin/activate
-uvicorn main:app --host 127.0.0.1 --port 8081 --reload
-```
-
-The `--reload` flag enables auto-restart on code changes. The gateway serves:
-
-| URL | Content |
-|:----|:--------|
-| `http://localhost:8081/health` | Health check |
-| `http://localhost:8081/embed.js` | Embed script |
-| `http://localhost:8081/demo/` | Demo e-commerce site |
-| `http://localhost:8081/api/sites` | Site configuration API |
-| `ws://localhost:8081/ws/{site_id}/{session_id}` | WebSocket streaming |
-
-### Build the Embed Script
-
-```bash
-cd embed
-npm run build
-```
-
-Output: `dist/webclaw.js` (19.6KB minified IIFE bundle)
-
-For development with watch mode:
-
-```bash
-# esbuild does not have a built-in watch, but you can use:
-npx esbuild src/index.ts --bundle --minify --format=iife --outfile=dist/webclaw.js --watch
-```
-
-### Serve the Demo Site
-
-The gateway automatically serves `demo-site/` at `/demo/`. No separate server needed.
-
-Alternatively, for standalone serving:
-
-```bash
-python3 -m http.server 3000 -d demo-site
-```
-
-## Project Structure
-
-```
-webclaw/
-├── gateway/                    # Python backend
-│   ├── main.py                 # FastAPI app (302 lines)
-│   ├── agent/
-│   │   ├── agent.py            # ADK Agent definition
-│   │   ├── prompts.py          # System prompts
-│   │   └── tools.py            # 8 DOM tools
-│   ├── context/
-│   │   └── broker.py           # Site config + context broker
-│   ├── voice/                  # Voice pipeline (reserved)
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── .env                    # API keys (gitignored)
-│
-├── embed/                      # TypeScript client bundle
-│   ├── src/
-│   │   ├── index.ts            # Entry + overlay UI (420 lines)
-│   │   ├── gateway-client.ts   # WebSocket client (147 lines)
-│   │   ├── audio.ts            # Mic capture + playback (106 lines)
-│   │   ├── avatar.ts           # Canvas 2D avatar (225 lines)
-│   │   ├── dom-actions.ts      # Action executor (148 lines)
-│   │   ├── dom-snapshot.ts     # DOM serializer (128 lines)
-│   │   └── overlay.ts          # Panel UI (267 lines)
-│   ├── dist/
-│   │   └── webclaw.js          # Built bundle (19.6KB)
-│   ├── package.json
-│   └── tsconfig.json
-│
-├── extension/                  # Chrome extension (MV3)
-│   ├── manifest.json
-│   ├── popup.html / popup.js
-│   ├── content.js              # Content script (313 lines)
-│   ├── background.js           # Service worker
-│   └── icons/
-│
-├── demo-site/                  # Demo e-commerce site
-│   └── index.html              # TechByte Store
-│
-├── diagrams/                   # Mermaid sources + SVG exports
-│   ├── d1-system-architecture.mmd / .svg
-│   ├── d2-site-agent-sequence.mmd / .svg
-│   ├── d3-personal-agent-sequence.mmd / .svg
-│   └── d4-asymmetric-privacy.mmd / .svg
-│
-├── infra/                      # GCP infrastructure
-│   ├── main.tf                 # Terraform (137 lines)
-│   ├── deploy.sh               # Quick deploy script
-│   └── terraform.tfvars.example
-│
-├── docs/                       # Documentation
-├── CONCEPT.md                  # Design vision
-├── CHALLENGE.md                # Hackathon rules
-└── README.md                   # Project overview
-```
-
-## Build Pipeline
-
-### Embed Script
-
-The embed script uses esbuild to compile TypeScript and bundle all modules into a single IIFE:
-
-```json
-// package.json
-{
-  "scripts": {
-    "build": "esbuild src/index.ts --bundle --minify --format=iife --outfile=dist/webclaw.js"
-  }
-}
-```
-
-**Why esbuild:**
-- 2ms build time (vs seconds with Webpack/Rollup)
-- 19.6KB output (zero runtime dependencies)
-- IIFE format executes immediately via `<script>` tag
-- No module system required on the host page
-
-**Bundle composition:**
-
-| Module | Approximate Size |
-|:-------|:----------------|
-| `index.ts` + `overlay.ts` | ~8KB |
-| `gateway-client.ts` | ~2KB |
-| `audio.ts` | ~2KB |
-| `avatar.ts` | ~4KB |
-| `dom-actions.ts` | ~2KB |
-| `dom-snapshot.ts` | ~1.6KB |
-| **Total (minified)** | **19.6KB** |
-
-### Gateway
-
-No build step required. Python files are loaded directly by uvicorn. The gateway uses standard Python packaging with `requirements.txt`.
-
-### Chrome Extension
-
-No build step required. The extension uses vanilla JavaScript and is loaded directly by Chrome.
-
-### Diagrams
-
-Mermaid diagrams are rendered to SVG using the `mmdc` CLI:
-
-```bash
-cd diagrams
-for f in *.mmd; do
-  mmdc -i "$f" -o "${f%.mmd}.svg" -t dark -b transparent
-done
-```
-
-Requires: `npm install -g @mermaid-js/mermaid-cli`
-
-## Key Files
-
-### Gateway: `main.py`
-
-The main application file. Contains:
-- FastAPI app setup with CORS middleware
-- REST endpoints for site management
-- WebSocket endpoint with upstream/downstream task pattern
-- Static file serving for embed script and demo site
-
-### Agent: `agent/agent.py`
-
-Single-file agent definition:
-
-```python
-root_agent = Agent(
-    name="webclaw_agent",
-    model="gemini-2.0-flash-exp-image-generation",
-    instruction=WEBCLAW_SYSTEM_PROMPT,
-    tools=DOM_TOOLS,
-)
-```
-
-To change the model, edit this file. Only models supporting `bidiGenerateContent` work with the Live API. Currently verified:
-- `gemini-2.0-flash-exp-image-generation` (recommended)
-- `gemini-2.5-flash-native-audio-latest`
-
-### Context: `context/broker.py`
-
-In-memory site configuration store. The `build_agent_context()` function is called at the start of every WebSocket session to inject site-specific knowledge into the agent.
-
-To add Firestore persistence, replace `_site_configs` dict with Firestore reads/writes while keeping the same interface.
-
-## Debugging
-
-### Gateway Logs
-
-The gateway uses Python's `logging` module at INFO level:
-
-```
-2026-03-06 15:30:11 - webclaw.gateway - INFO - WebSocket connect: site=demo session=test123
-2026-03-06 15:30:11 - google_adk - INFO - Establishing live connection for agent: webclaw_agent
-2026-03-06 15:30:12 - google_adk - INFO - Update session resumption handle: ...
-```
-
-Set `DEBUG` level for verbose ADK and Gemini SDK logs:
-
-```python
-logging.basicConfig(level=logging.DEBUG)
-```
-
-### Browser Console
-
-The embed script logs to the browser console. Open DevTools (F12) → Console:
-
-```
-[WebClaw] Initializing with site_id=demo gateway=http://localhost:8081
-[WebClaw] Shadow DOM created
-[WebClaw] WebSocket connecting...
-[WebClaw] Connected
-[WebClaw] DOM snapshot sent (2341 chars)
-```
-
-### WebSocket Inspector
-
-Use the browser's Network tab → WS filter to inspect WebSocket frames:
-- **Green frames:** Client → Server (your messages, audio, DOM snapshots)
-- **Red frames:** Server → Client (agent responses, audio, tool calls)
-
-### Common Issues
-
-| Issue | Cause | Fix |
-|:------|:------|:----|
-| `embed.js` returns 404 | Embed not built | `cd embed && npm run build` |
-| WebSocket connects then closes | Bad API key | Check `gateway/.env` |
-| Model not found error | Deprecated model | Update model in `agent/agent.py` |
-| No audio playback | Browser autoplay policy | User must interact first (click) |
-| CORS error in console | Gateway not running | Start gateway on correct port |
-| `AudioContext not allowed` | No user gesture | Requires click before audio init |
-
-## Git Workflow
-
-The project uses conventional commits:
-
-```
-feat(gateway): add session resumption support
-fix(embed): resolve audio playback on Safari
-docs: add WebSocket protocol reference
-refactor(agent): extract prompt builder function
-chore: update dependencies
-```
-
-## Dependencies
-
-### Gateway (Python)
+The gateway's core dependencies:
 
 | Package | Version | Purpose |
 |:--------|:--------|:--------|
 | `google-adk` | 1.26.0 | Agent Development Kit |
-| `google-genai` | 1.66.0 | Gemini API client |
+| `google-genai` | 1.66.0 | Google GenAI SDK |
 | `fastapi` | 0.135.1 | Async web framework |
 | `uvicorn` | 0.41.0 | ASGI server |
-| `python-dotenv` | — | Environment file loading |
-| `google-cloud-firestore` | — | Firestore client (production) |
+| `python-dotenv` | — | Environment variable loading |
 
-### Embed (Node.js)
+### Running the Gateway
 
-| Package | Version | Purpose |
-|:--------|:--------|:--------|
-| `esbuild` | — | TypeScript bundler |
-| `typescript` | — | Type checking |
+**Standard mode:**
 
-No runtime dependencies. The bundle is self-contained.
+```bash
+uvicorn main:app --host 127.0.0.1 --port 8081
+```
+
+**Development mode (auto-reload):**
+
+```bash
+uvicorn main:app --host 127.0.0.1 --port 8081 --reload
+```
+
+Auto-reload watches for file changes in the gateway directory and restarts the server. Note that active WebSocket connections will be dropped on reload.
+
+### Gateway Module Map
+
+```
+gateway/
+├── main.py              # FastAPI app, WebSocket handler, REST endpoints
+├── agent/
+│   ├── __init__.py
+│   ├── agent.py         # ADK Agent definition (model, tools, prompt)
+│   ├── prompts.py       # System prompt + site-specific prompt builder
+│   └── tools.py         # 8 DOM action tool functions
+├── context/
+│   ├── __init__.py
+│   └── broker.py        # Site config store + context merger
+├── voice/               # Reserved for voice pipeline enhancements
+│   └── __init__.py
+├── requirements.txt
+├── Dockerfile
+├── .env.example
+└── .env                 # Your local config (git-ignored)
+```
+
+### Testing the Gateway
+
+**Health check:**
+
+```bash
+curl http://127.0.0.1:8081/health
+```
+
+**Site config API:**
+
+```bash
+# List sites
+curl http://127.0.0.1:8081/api/sites
+
+# Create a test site
+curl -X POST http://127.0.0.1:8081/api/sites \
+  -H "Content-Type: application/json" \
+  -d '{"domain":"test.com","persona_name":"TestBot"}'
+```
+
+**WebSocket test (Python):**
+
+```python
+import asyncio, websockets, json
+
+async def test():
+    async with websockets.connect("ws://127.0.0.1:8081/ws/demo/test") as ws:
+        await ws.send(json.dumps({"type": "text", "text": "Hello!"}))
+        async for msg in ws:
+            data = json.loads(msg)
+            if data.get("content", {}).get("parts"):
+                for part in data["content"]["parts"]:
+                    if "text" in part:
+                        print(f"Agent: {part['text']}")
+                    elif "inlineData" in part:
+                        print(f"Audio: {part['inlineData']['mimeType']}")
+            if data.get("turnComplete"):
+                break
+
+asyncio.run(test())
+```
+
+## Embed Script Development
+
+### Setup
+
+```bash
+cd embed
+npm install
+```
+
+### Building
+
+**One-time build:**
+
+```bash
+npm run build
+# → dist/webclaw.js  19.6kb ⚡ Done in 2ms
+```
+
+**Watch mode (rebuild on change):**
+
+```bash
+npx esbuild src/index.ts \
+  --bundle \
+  --minify \
+  --format=iife \
+  --global-name=WebClaw \
+  --outfile=dist/webclaw.js \
+  --watch
+```
+
+### Module Architecture
+
+| Module | Lines | Responsibility |
+|:-------|------:|:---------------|
+| `index.ts` | 420 | Main entry, Shadow DOM overlay, UI state machine, event wiring |
+| `avatar.ts` | 225 | Canvas 2D animated face, lip-sync, eye blinks, state animations |
+| `gateway-client.ts` | 147 | WebSocket client, event emitter, message serialization |
+| `audio.ts` | 106 | Mic capture (16kHz PCM), playback (24kHz PCM), Web Audio API |
+| `dom-actions.ts` | 148 | DOM action executor, smart element finder (CSS/ARIA/text) |
+| `dom-snapshot.ts` | 128 | Token-efficient DOM serializer for agent context |
+| `overlay.ts` | 267 | (Legacy) overlay component |
+
+### Bundle Analysis
+
+The embed script produces a single IIFE bundle with zero runtime dependencies:
+
+```
+dist/webclaw.js
+├── index.ts        (~8KB)  Entry + UI
+├── avatar.ts       (~4KB)  Canvas animation
+├── gateway-client  (~3KB)  WebSocket
+├── audio.ts        (~2KB)  Web Audio
+├── dom-actions.ts  (~1.5KB) DOM executor
+└── dom-snapshot.ts (~1.1KB) DOM serializer
+                    --------
+Total:              19.6KB minified
+```
+
+### Testing the Embed Script
+
+Open the demo site with the gateway running:
+
+```bash
+# Terminal 1: Gateway
+cd gateway && source .venv/bin/activate && uvicorn main:app --port 8081
+
+# Terminal 2: Demo site
+cd demo-site && python -m http.server 3000
+
+# Browser: http://localhost:3000
+```
+
+Or use the gateway's built-in demo mount: `http://127.0.0.1:8081/demo`
+
+## Chrome Extension Development
+
+### Loading the Extension
+
+1. Open `chrome://extensions`
+2. Enable **Developer Mode**
+3. Click **Load unpacked** → select `extension/`
+4. Pin the WebClaw icon to your toolbar
+
+### Debugging
+
+**Popup:** Right-click the toolbar icon → "Inspect Popup"
+
+**Content script:** Open DevTools on any page → Console. Content script logs are prefixed with `[WebClaw]`.
+
+**Service worker:** Go to `chrome://extensions` → click "Inspect views: service worker" under the WebClaw entry.
+
+### Reloading After Changes
+
+Click the refresh icon (🔄) on the extension card in `chrome://extensions`. For content script changes, also refresh the target page.
+
+## End-to-End Testing
+
+### Full Stack Local Test
+
+```bash
+# 1. Start gateway
+cd gateway && source .venv/bin/activate
+uvicorn main:app --host 127.0.0.1 --port 8081 &
+
+# 2. Build embed
+cd ../embed && npm run build
+
+# 3. Open demo
+open http://127.0.0.1:8081/demo
+```
+
+### Verified Test Output
+
+A successful end-to-end test produces this pattern:
+
+```
+Gateway logs:
+  WebSocket connect: site=demo session=test456
+  Trying to connect to live model: gemini-2.0-flash-exp-image-generation
+  Update session resumption handle: new_handle=...
+
+Client receives:
+  AUDIO: audio/pcm;rate=24000 (12800 b64 chars)
+  AUDIO: audio/pcm;rate=24000 (15360 b64 chars)
+  ...
+  EVT: ['turnComplete', ...]
+```
+
+### Common Development Issues
+
+| Issue | Cause | Fix |
+|:------|:------|:----|
+| `ModuleNotFoundError: google.adk` | venv not activated | `source .venv/bin/activate` |
+| `GOOGLE_API_KEY not set` | Missing `.env` file | `cp .env.example .env` and add key |
+| WebSocket connects but no response | Wrong model name | Check `agent/agent.py` model supports `bidiGenerateContent` |
+| Embed script 404 | Not built | `cd embed && npm run build` |
+| CORS errors | Gateway not running | Start gateway first |
+| Extension not injecting | Page not refreshed | Refresh the page after loading extension |
+
+## Code Style
+
+- **Python:** Standard library conventions, type hints, `logging` over `print`
+- **TypeScript:** Strict mode, no `any`, explicit return types
+- **Commits:** [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `refactor:`)
