@@ -68,7 +68,7 @@
       <div id="wc-messages" style="flex:1;overflow-y:auto;padding:14px;min-height:180px;max-height:300px;font-size:14px;"></div>
       <div style="display:flex;border-top:1px solid #eee;padding:8px;gap:8px;align-items:center;">
         <input id="wc-input" type="text" placeholder="Type or speak..." style="flex:1;border:none;outline:none;padding:10px;font-size:14px;" />
-        <button id="wc-mic" style="width:36px;height:36px;border-radius:50%;border:none;background:#4285f4;color:white;cursor:pointer;font-size:16px;">🎤</button>
+        <button id="wc-mic" style="width:36px;height:36px;border-radius:50%;border:none;background:#FF4D4D;color:white;cursor:pointer;font-size:16px;">🎤</button>
       </div>
     `;
 
@@ -219,7 +219,7 @@
   function highlightEl(el, message) {
     const rect = el.getBoundingClientRect();
     const hl = document.createElement('div');
-    hl.style.cssText = `position:fixed;top:${rect.top-4}px;left:${rect.left-4}px;width:${rect.width+8}px;height:${rect.height+8}px;border:3px solid #4285f4;border-radius:8px;background:rgba(66,133,244,0.1);pointer-events:none;z-index:999998;`;
+    hl.style.cssText = `position:fixed;top:${rect.top-4}px;left:${rect.left-4}px;width:${rect.width+8}px;height:${rect.height+8}px;border:3px solid #FF4D4D;border-radius:8px;background:rgba(255,77,77,0.1);pointer-events:none;z-index:999998;`;
     if (message) {
       const tip = document.createElement('div');
       tip.style.cssText = 'position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:#333;color:white;padding:4px 10px;border-radius:6px;font-size:12px;white-space:nowrap;margin-bottom:6px;';
@@ -240,7 +240,7 @@
     const container = overlay?.querySelector('#wc-messages');
     if (!container) return;
     const div = document.createElement('div');
-    const colors = { user: '#4285f4', agent: '#f0f0f0', system: '#fff3cd', action: '#d4edda', error: '#f8d7da' };
+    const colors = { user: '#FF4D4D', agent: '#f0f0f0', system: '#fff3cd', action: '#d4edda', error: '#f8d7da' };
     const textColors = { user: 'white', agent: '#333', system: '#856404', action: '#155724', error: '#721c24' };
     div.style.cssText = `margin-bottom:8px;padding:8px 12px;border-radius:10px;font-size:13px;line-height:1.4;background:${colors[role]||'#f0f0f0'};color:${textColors[role]||'#333'};${role==='user'?'margin-left:40px;text-align:right;':'margin-right:40px;'}`;
     div.textContent = text;
@@ -288,7 +288,7 @@
     micActive = !micActive;
     const btn = overlay?.querySelector('#wc-mic');
     if (btn) {
-      btn.style.background = micActive ? '#ea4335' : '#4285f4';
+      btn.style.background = micActive ? '#ea4335' : '#FF4D4D';
     }
     if (micActive && !mediaStream) startMic().then(() => { micActive = true; });
   }
