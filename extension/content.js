@@ -95,6 +95,20 @@
 
     ws.onopen = () => {
       addMessage('system', 'Connected to WebClaw');
+
+      // Agent Negotiation Protocol: announce Personal Agent capabilities
+      ws.send(JSON.stringify({
+        type: 'negotiate',
+        capabilities: {
+          agent_type: 'personal',
+          can_capture_screenshots: true,
+          can_execute_actions: true,
+          has_mic_permission: true,
+          has_cross_site_context: true,
+          preferences: {}, // User prefs loaded from storage
+        },
+      }));
+
       if (sendDom) {
         // Send initial page context
         const snapshot = captureSimpleSnapshot();
@@ -120,6 +134,14 @@
   }
 
   function handleEvent(event) {
+    // Negotiation acknowledgment from Site Agent
+    if (event.type === 'negotiate_ack') {
+      const persona = event.persona?.name || 'WebClaw';
+      const perms = event.site_permissions || {};
+      addMessage('system', `Negotiated with ${persona}. Allowed: ${(perms.allowed_actions || []).join(', ')}`);
+      return;
+    }
+
     if (event.content?.parts) {
       for (const part of event.content.parts) {
         if (part.text) {
