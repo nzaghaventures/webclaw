@@ -74,3 +74,7 @@ webclaw/
 **Zero-friction integration.** For site owners, integration is a single script tag. For users, it is a browser extension install. No SDKs, no build steps, no configuration files.
 
 **Privacy by architecture.** The asymmetric context broker is not a policy; it is infrastructure. The Gateway physically cannot leak user data to the site because the data flow is one-directional by design.
+
+## Brand Identity
+
+WebClaw's visual identity descends from OpenClaw: a red gradient (`#FF4D4D` to `#991B1B`) with teal accents (`#00E5CC`). The logomark is a geometric claw/shield, the avatar pulses red when idle and teal when listening. Full details, assets, and usage guidelines are in the [Branding](branding.md) reference.

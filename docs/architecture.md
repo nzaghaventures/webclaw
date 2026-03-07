@@ -57,11 +57,12 @@ WebClaw follows a **Gateway architecture** where a central server mediates all c
 
 ### Gateway (`gateway/main.py`)
 
-The gateway is a **FastAPI** application (v0.2.0) serving three roles:
+The gateway is a **FastAPI** application (v0.2.0) serving four roles:
 
 1. **REST API server** for site configuration CRUD, knowledge base management, session history, and analytics
 2. **WebSocket server** for real-time bidirectional streaming between the browser and the Gemini Live API via ADK
 3. **Dashboard host** serving the built-in site owner dashboard at `/dashboard`
+4. **Static asset server** serving logos, favicons, and web manifest at `/static/`
 
 **Concurrency model:** Each WebSocket connection spawns two concurrent tasks via `asyncio.gather()`:
 

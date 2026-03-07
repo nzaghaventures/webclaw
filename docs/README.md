@@ -27,5 +27,6 @@ Welcome to the WebClaw documentation. WebClaw is a Personal Live Agent for Websi
 - [**GCP Deployment**](deployment-gcp.md): Cloud Run, Firestore, Terraform, and production configuration
 
 ### Reference
+- [**Branding**](branding.md): Logo assets, color palette, typography, and usage guidelines
 - [**Configuration Reference**](configuration.md): All configuration options for sites, agents, and infrastructure
 - [**Troubleshooting**](troubleshooting.md): Common issues, debugging, and FAQ
