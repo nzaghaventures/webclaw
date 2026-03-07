@@ -31,3 +31,4 @@ Thumbs.db
 !dashboard/dist/
 extension.crx
 extension.pem
+dashboard/package-lock.json
