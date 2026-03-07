@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebClaw Dashboard</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/img/favicon-180.png">
+  <link rel="manifest" crossorigin="use-credentials" href="/static/manifest.json">
+  <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <img src="/static/img/logomark.png" alt="WebClaw" class="sidebar-logo">
+        <h1>WebClaw</h1>
+      </div>
+      <p class="sidebar-subtitle">Site Owner Dashboard</p>
+      <nav id="nav">
+        <div class="nav-item active" data-page="overview">
+          <span class="icon">📊</span> Overview
+        </div>
+        <div class="nav-item" data-page="sites">
+          <span class="icon">🌐</span> Sites
+        </div>
+        <div class="nav-item" data-page="knowledge">
+          <span class="icon">📚</span> Knowledge Base
+        </div>
+        <div class="nav-item" data-page="sessions">
+          <span class="icon">💬</span> Sessions
+        </div>
+        <div class="nav-item" data-page="settings">
+          <span class="icon">⚙️</span> Settings
+        </div>
+      </nav>
+    </div>
+    <main class="main" id="main-content"></main>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
