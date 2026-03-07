@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🦀 WebClaw
+<img src="branding/logos/logomark_red.png" alt="WebClaw" width="120">
+
+# WebClaw
 
 ### Personal Live Agent for Website Operations and Support
 
