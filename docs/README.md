@@ -18,8 +18,8 @@ Welcome to the WebClaw documentation. WebClaw is a Personal Live Agent for Websi
 - [**Personal Agent Guide**](personal-agent-guide.md): Install the Chrome extension for a personal AI assistant
 
 ### API Reference
-- [**REST API**](api-rest.md): Site configuration CRUD endpoints
-- [**WebSocket Protocol**](api-websocket.md): Bidirectional streaming protocol specification
+- [**REST API**](api-rest.md): Site config CRUD, knowledge base, sessions, analytics, dashboard
+- [**WebSocket Protocol**](api-websocket.md): Bidirectional streaming, screenshots, agent negotiation
 - [**DOM Tools**](api-dom-tools.md): Agent tool definitions and action engine internals
 
 ### Deployment

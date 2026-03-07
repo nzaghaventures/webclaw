@@ -146,6 +146,57 @@ Base64-decoded and forwarded to Gemini as a `types.Blob` via `send_realtime()`.
 
 Formatted as `[Action Result] {json}` and forwarded as text content, giving the agent feedback on whether its actions succeeded.
 
+#### `screenshot`: Vision-based Page Understanding
+
+```json
+{
+  "type": "screenshot",
+  "data": "iVBORw0KGgoAAAANSUhEUg...",
+  "url": "https://example.com/products",
+  "prompt": "Describe the product layout on this page."
+}
+```
+
+| Field | Type | Required | Description |
+|:------|:-----|:--------:|:------------|
+| `type` | `"screenshot"` | ✅ | Message type identifier |
+| `data` | string | ✅ | Base64-encoded JPEG image data |
+| `url` | string | | Current page URL (for context) |
+| `mimeType` | string | | MIME type (default: `"image/jpeg"`) |
+| `prompt` | string | | Optional prompt for the vision model |
+
+Unlike the `image` type (which uses `send_realtime()`), screenshots are sent via `send_content()` as a `types.Content` with both a text part (page URL and prompt) and an inline image part. This enables Gemini's vision capabilities for page understanding, layout analysis, and visual element identification.
+
+The embed script sends a screenshot automatically on connection, and can send additional screenshots on demand. The Chrome Extension uses `chrome.tabs.captureVisibleTab()` for higher-fidelity captures.
+
+#### `negotiate`: Agent Negotiation Protocol
+
+```json
+{
+  "type": "negotiate",
+  "capabilities": {
+    "agent_type": "personal",
+    "can_capture_screenshots": true,
+    "can_execute_actions": true,
+    "has_mic_permission": true,
+    "has_cross_site_context": true,
+    "preferences": {}
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|:------|:-----|:--------:|:------------|
+| `type` | `"negotiate"` | ✅ | Message type identifier |
+| `capabilities` | object | ✅ | Agent capabilities and preferences |
+
+Sent by the Chrome Extension (Personal Agent) when connecting to a WebClaw-integrated site. The gateway:
+
+1. Injects the negotiation context into the Gemini session, instructing it to merge user preferences with site knowledge while keeping user data private
+2. Returns a `negotiate_ack` message (see Server-to-Client messages below)
+
+This protocol enables the asymmetric privacy broker: the site's knowledge enriches the Personal Agent's context, but the user's personal data never flows back to the site owner.
+
 ## Server-to-Client Messages
 
 The gateway forwards raw ADK events as JSON. Each event is the JSON serialization of a Google ADK `LlmResponse` object (with `null` fields excluded).
@@ -178,6 +229,25 @@ Every event contains some subset of these fields:
 ### Content Parts
 
 Events with `content.parts` contain the agent's output. Parts can be:
+
+#### Negotiation Acknowledgment
+
+When a `negotiate` message is received, the gateway sends back a `negotiate_ack` before any ADK events:
+
+```json
+{
+  "type": "negotiate_ack",
+  "site_permissions": {
+    "allowed_actions": ["click", "scroll", "navigate", "highlight", "read"]
+  },
+  "persona": {
+    "name": "Aria",
+    "voice": "warm, professional, concise"
+  }
+}
+```
+
+The Personal Agent uses this to adapt its behavior: respecting the site's action permissions, adopting the site persona's communication style, and knowing what capabilities are available.
 
 #### Text Part
 

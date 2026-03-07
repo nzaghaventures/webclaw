@@ -28,7 +28,8 @@ Returns the gateway's health status. Used by Cloud Run for liveness probes.
 ```json
 {
   "status": "ok",
-  "service": "webclaw-gateway"
+  "service": "webclaw-gateway",
+  "version": "0.2.0"
 }
 ```
 
@@ -209,6 +210,256 @@ Update an existing site's configuration. Replaces all fields (not a partial upda
 **Status codes:**
 - `200`: Updated successfully
 - `404`: `{"error": "Site not found"}`
+
+---
+
+### Delete Site
+
+```
+DELETE /api/sites/{site_id}
+```
+
+Remove a site configuration.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|:----------|:-----|:------------|
+| `site_id` | string | Site identifier |
+
+**Response:**
+
+```json
+{
+  "deleted": true,
+  "site_id": "a1b2c3d4"
+}
+```
+
+**Status codes:**
+- `200`: Deleted successfully
+- `404`: `{"error": "Site not found"}`
+
+---
+
+### List Knowledge Documents
+
+```
+GET /api/sites/{site_id}/knowledge
+```
+
+Returns all knowledge base documents for a site. These are structured documents stored in Firestore and automatically merged into the agent's context.
+
+**Response:**
+
+```json
+{
+  "documents": [
+    {
+      "id": "f8e7d6c5",
+      "title": "Shipping Policy",
+      "content": "Free shipping over $30..."
+    }
+  ]
+}
+```
+
+**Status codes:**
+- `200`: Success
+- `404`: `{"error": "Site not found"}`
+
+---
+
+### Create Knowledge Document
+
+```
+POST /api/sites/{site_id}/knowledge
+```
+
+Add a knowledge base document to a site.
+
+**Request body:**
+
+```json
+{
+  "title": "Shipping Policy",
+  "content": "Free shipping over $30. Standard: 3-5 days ($5.99)."
+}
+```
+
+| Field | Type | Required | Description |
+|:------|:-----|:--------:|:------------|
+| `title` | string | | Document title (for dashboard display) |
+| `content` | string | ✅ | Knowledge content for agent context |
+
+**Response:**
+
+```json
+{
+  "id": "f8e7d6c5",
+  "title": "Shipping Policy"
+}
+```
+
+---
+
+### Update Knowledge Document
+
+```
+PUT /api/sites/{site_id}/knowledge/{doc_id}
+```
+
+Update an existing knowledge document.
+
+**Request body:** Same as POST.
+
+**Response:**
+
+```json
+{
+  "id": "f8e7d6c5",
+  "title": "Shipping Policy"
+}
+```
+
+---
+
+### Delete Knowledge Document
+
+```
+DELETE /api/sites/{site_id}/knowledge/{doc_id}
+```
+
+Remove a knowledge document.
+
+**Response:**
+
+```json
+{
+  "deleted": true
+}
+```
+
+---
+
+### List Sessions
+
+```
+GET /api/sites/{site_id}/sessions?limit=50
+```
+
+Returns recent conversation sessions for a site. Sessions are saved to Firestore when the WebSocket disconnects.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|:----------|:-----|:--------|:------------|
+| `limit` | int | `50` | Max sessions to return |
+
+**Response:**
+
+```json
+{
+  "sessions": [
+    {
+      "session_id": "wc_abc123...",
+      "user_id": "user_abc1",
+      "messages": [...],
+      "metadata": {
+        "duration_seconds": 145,
+        "message_count": 12
+      },
+      "updated_at": 1741305012.345
+    }
+  ]
+}
+```
+
+**Status codes:**
+- `200`: Success
+- `404`: `{"error": "Site not found"}`
+
+---
+
+### Get Session
+
+```
+GET /api/sites/{site_id}/sessions/{session_id}
+```
+
+Returns the full conversation history for a session.
+
+**Response:**
+
+```json
+{
+  "session": {
+    "session_id": "wc_abc123...",
+    "user_id": "user_abc1",
+    "messages": [
+      {
+        "role": "user",
+        "type": "text",
+        "text": "What products do you sell?",
+        "ts": 1741305012.345
+      },
+      {
+        "role": "agent",
+        "type": "transcription",
+        "text": "We have a great selection of...",
+        "ts": 1741305015.678
+      }
+    ],
+    "metadata": {
+      "duration_seconds": 145,
+      "message_count": 12
+    }
+  }
+}
+```
+
+**Status codes:**
+- `200`: Success
+- `404`: `{"error": "Session not found"}`
+
+---
+
+### Site Analytics
+
+```
+GET /api/sites/{site_id}/stats
+```
+
+Returns analytics counters for a site.
+
+**Response:**
+
+```json
+{
+  "stats": {
+    "sessions_total": 42,
+    "messages_text": 156,
+    "actions_executed": 23,
+    "audio_frames": 5840,
+    "screenshots": 38,
+    "negotiations": 5
+  }
+}
+```
+
+**Status codes:**
+- `200`: Success
+- `404`: `{"error": "Site not found"}`
+
+---
+
+### Dashboard
+
+```
+GET /dashboard
+```
+
+Serves the built-in site owner dashboard (static HTML). Provides a visual interface for managing sites, knowledge base, sessions, and analytics. No authentication required in the MVP.
 
 ---
 

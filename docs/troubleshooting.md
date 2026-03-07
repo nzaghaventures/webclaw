@@ -17,7 +17,7 @@ grep GOOGLE_API_KEY gateway/.env
 
 # 3. Is the embed script built?
 ls -la embed/dist/webclaw.js
-# Expected: 19.6KB file
+# Expected: 26.1KB file
 
 # 4. Can the gateway serve the embed script?
 curl -I http://127.0.0.1:8081/embed.js

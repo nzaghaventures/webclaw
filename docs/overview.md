@@ -12,7 +12,7 @@ WebClaw has two complementary modes of operation:
 
 ### Site Agent Mode
 
-Website owners integrate WebClaw by adding a single `<script>` tag to their HTML, the same pattern as Google Analytics or Intercom. They configure a persona, knowledge base, allowed actions, and brand voice through the REST API. When a visitor arrives, the embed script (19.6KB) loads a Shadow DOM overlay with an animated avatar. The visitor speaks or types; the agent responds with natural voice and takes actions on the page.
+Website owners integrate WebClaw by adding a single `<script>` tag to their HTML, the same pattern as Google Analytics or Intercom. They configure a persona, knowledge base, allowed actions, and brand voice through the REST API. When a visitor arrives, the embed script (26.1KB) loads a Shadow DOM overlay with an animated avatar. The visitor speaks or types; the agent responds with natural voice and takes actions on the page.
 
 ```html
 <script src="https://your-gateway.run.app/embed.js"
@@ -52,9 +52,10 @@ WebClaw is built on three Google technologies:
 
 ```
 webclaw/
-├── gateway/          Python FastAPI backend (ADK agent, WebSocket, REST API)
-├── embed/            TypeScript embed script (Shadow DOM overlay, audio, avatar)
-├── extension/        Chrome Extension MV3 (Personal Agent mode)
+├── gateway/          Python FastAPI backend (ADK agent, WebSocket, REST API, Firestore)
+├── embed/            TypeScript embed script (Shadow DOM overlay, audio, avatar, action viz)
+├── extension/        Chrome Extension MV3 (Personal Agent mode, negotiation protocol)
+├── dashboard/        Site owner dashboard (vanilla HTML/JS, served at /dashboard)
 ├── demo-site/        Demo e-commerce site (TechByte Store)
 ├── diagrams/         Mermaid source files + rendered SVGs
 ├── infra/            Terraform + deploy script for GCP

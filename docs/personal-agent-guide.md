@@ -107,6 +107,8 @@ When you visit a site that has WebClaw's embed script installed, the Personal Ag
 - **Configured permissions**: the agent knows what it is and isn't allowed to do
 - **Brand persona**: responses match the site's voice and style
 
+This happens through the **Agent Negotiation Protocol**. On connection, the extension sends a `negotiate` message declaring its capabilities (screenshot capture, action execution, mic access, cross-site context). The gateway responds with a `negotiate_ack` containing the site's permissions and persona. The agent merges both contexts while keeping user data private.
+
 The Personal Agent's private context (your preferences, history) is **never shared** with the site. See [Security & Privacy](security.md) for details.
 
 ## Architecture
@@ -168,7 +170,7 @@ Service worker for extension lifecycle. Currently minimal; will handle:
 | Site knowledge base access | When available | ✅ Always |
 | Site owner analytics | ❌ | ✅ |
 | Style isolation | Shadow DOM | Shadow DOM |
-| Bundle size | ~30KB (unminified) | 19.6KB (minified) |
+| Bundle size | ~30KB (unminified) | 26.1KB (minified) |
 
 ## Privacy
 

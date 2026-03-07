@@ -177,14 +177,16 @@ The embed script produces a single IIFE bundle with zero runtime dependencies:
 
 ```
 dist/webclaw.js
-├── index.ts        (~8KB)  Entry + UI
-├── avatar.ts       (~4KB)  Canvas animation
-├── gateway-client  (~3KB)  WebSocket
-├── audio.ts        (~2KB)  Web Audio
-├── dom-actions.ts  (~1.5KB) DOM executor
-└── dom-snapshot.ts (~1.1KB) DOM serializer
-                    --------
-Total:              19.6KB minified
+├── index.ts             (~8KB)  Entry + UI
+├── avatar.ts            (~4KB)  Canvas animation
+├── action-visualizer.ts (~3KB)  Bezier flight animation
+├── gateway-client.ts    (~3KB)  WebSocket
+├── screenshot.ts        (~3KB)  Viewport capture
+├── audio.ts             (~2KB)  Web Audio
+├── dom-actions.ts       (~1.5KB) DOM executor
+└── dom-snapshot.ts      (~1.1KB) DOM serializer
+                         --------
+Total:                   26.1KB minified
 ```
 
 ### Testing the Embed Script

@@ -209,9 +209,73 @@ curl https://your-gateway.run.app/api/sites
 
 ### Delete a Site
 
-Currently handled by redeploying the gateway. Firestore-backed persistence (coming soon) will support DELETE operations.
+```bash
+curl -X DELETE https://your-gateway.run.app/api/sites/a1b2c3d4
+```
+
+### Using the Dashboard
+
+The gateway includes a built-in dashboard at `/dashboard`. Open your browser to:
+
+```
+https://your-gateway.run.app/dashboard
+```
+
+The dashboard provides a visual interface for all management tasks:
+
+- **Overview**: Stats (sessions, messages, actions), site list, embed snippet generator
+- **Sites**: Create, edit, and delete site configurations
+- **Knowledge Base**: Add, edit, and delete structured knowledge documents per site
+- **Sessions**: Browse conversation history with full message transcripts
+- **Settings**: Gateway connection info and version
+
+The dashboard connects to the same REST API documented in [API Reference](api-rest.md). Everything you can do from the CLI, you can do from the dashboard.
+
+### Structured Knowledge Base (Firestore)
+
+In addition to the `knowledge_base` text field on site config, you can store structured knowledge documents via the API or dashboard. These are stored in Firestore and automatically merged into the agent's context:
+
+```bash
+# Add a knowledge document
+curl -X POST https://your-gateway.run.app/api/sites/a1b2c3d4/knowledge \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Shipping Policy", "content": "Free shipping over $30. Standard: 3-5 days ($5.99). Express: 1-2 days ($12.99)."}'
+
+# List all knowledge documents
+curl https://your-gateway.run.app/api/sites/a1b2c3d4/knowledge
+
+# Update a document
+curl -X PUT https://your-gateway.run.app/api/sites/a1b2c3d4/knowledge/doc_id \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Shipping Policy", "content": "Updated content..."}'
+
+# Delete a document
+curl -X DELETE https://your-gateway.run.app/api/sites/a1b2c3d4/knowledge/doc_id
+```
 
 ## Monitoring
+
+### Session History
+
+View conversation transcripts for any site:
+
+```bash
+# List recent sessions
+curl https://your-gateway.run.app/api/sites/a1b2c3d4/sessions?limit=20
+
+# View a specific session's messages
+curl https://your-gateway.run.app/api/sites/a1b2c3d4/sessions/session_id
+```
+
+Sessions are saved to Firestore when the WebSocket disconnects. Each session record includes messages (role, type, text, timestamp), duration, and message count.
+
+### Analytics
+
+```bash
+curl https://your-gateway.run.app/api/sites/a1b2c3d4/stats
+```
+
+Returns counters for: `sessions_total`, `messages_text`, `actions_executed`, `audio_frames`, `screenshots`, `negotiations`.
 
 ### What the Agent Logs
 

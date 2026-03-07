@@ -57,10 +57,11 @@ WebClaw follows a **Gateway architecture** where a central server mediates all c
 
 ### Gateway (`gateway/main.py`)
 
-The gateway is a **FastAPI** application serving two roles:
+The gateway is a **FastAPI** application (v0.2.0) serving three roles:
 
-1. **REST API server** for site configuration CRUD (register sites, update knowledge bases, manage permissions)
+1. **REST API server** for site configuration CRUD, knowledge base management, session history, and analytics
 2. **WebSocket server** for real-time bidirectional streaming between the browser and the Gemini Live API via ADK
+3. **Dashboard host** serving the built-in site owner dashboard at `/dashboard`
 
 **Concurrency model:** Each WebSocket connection spawns two concurrent tasks via `asyncio.gather()`:
 
@@ -75,7 +76,20 @@ Browser ◄──WebSocket── Downstream Task ◄── runner.run_live() ◄
 
 This design allows full-duplex communication: the user can speak while the agent is responding (barge-in), and DOM action results flow back while the agent continues processing.
 
-**Session management:** The gateway uses ADK's `InMemorySessionService` for the MVP. Each WebSocket connection is identified by `(site_id, session_id)`. The session ID can be generated client-side (the embed script uses `crypto.randomUUID()`) or passed explicitly.
+**Session management:** The gateway uses ADK's `InMemorySessionService` for live sessions and **Firestore** for persistent session history. Each WebSocket connection is identified by `(site_id, session_id)`. The session ID is generated client-side. When a WebSocket disconnects, the conversation messages are saved to Firestore under `sites/{site_id}/sessions/{session_id}` with metadata (duration, message count).
+
+### Firestore Storage Layer (`gateway/storage/firestore.py`)
+
+A lazy-initialized Firestore client provides persistent storage with graceful in-memory fallback when Firestore is unavailable (local development without credentials):
+
+| Collection | Purpose |
+|:-----------|:--------|
+| `sites/{id}` | Site configurations |
+| `sites/{id}/sessions/{sid}` | Conversation history (messages, metadata) |
+| `sites/{id}/knowledge/{did}` | Structured knowledge base documents |
+| `sites/{id}/stats/counters` | Analytics counters (sessions, messages, actions) |
+
+The context broker (`gateway/context/broker.py`) operates as a dual-layer cache: Firestore is the primary store, with in-memory dictionaries as a fast read cache. On first access, configs are loaded from Firestore. All writes go to both layers simultaneously.
 
 ### ADK Agent (`gateway/agent/`)
 
@@ -136,25 +150,27 @@ The broker merges site knowledge with optional user context into a unified promp
 
 ### Embed Script (`embed/src/`)
 
-The embed script is a TypeScript application bundled with esbuild into a single 19.6KB IIFE file. It runs entirely in the browser with zero runtime dependencies.
+The embed script is a TypeScript application bundled with esbuild into a single 26.1KB IIFE file. It runs entirely in the browser with zero runtime dependencies.
 
 **Module architecture:**
 
 | Module | Responsibility | Size |
 |:-------|:---------------|:-----|
-| `index.ts` | Main entry, Shadow DOM overlay, UI state machine | 420 lines |
+| `index.ts` | Main entry, Shadow DOM overlay, UI state machine | ~450 lines |
 | `avatar.ts` | Canvas 2D animated face, lip-sync, state animations | 225 lines |
-| `gateway-client.ts` | WebSocket client, event system, reconnection | 147 lines |
+| `gateway-client.ts` | WebSocket client, event system, reconnection | 160 lines |
 | `audio.ts` | Mic capture (16kHz), playback (24kHz), Web Audio API | 106 lines |
 | `dom-actions.ts` | DOM action executor, smart element finder | 148 lines |
 | `dom-snapshot.ts` | Token-efficient DOM serializer | 128 lines |
+| `action-visualizer.ts` | Bezier flight animation from FAB to target elements | 223 lines |
+| `screenshot.ts` | Canvas-based viewport capture for vision context | 213 lines |
 
 **Shadow DOM isolation:** The overlay is wrapped in a `<webclaw-overlay>` custom element with a **closed** Shadow DOM. This provides complete CSS isolation in both directions: WebClaw styles never leak out, host page styles never leak in. This is critical for an embed script that must work on any website regardless of CSS framework.
 
 **Initialization flow:**
 
 ```
-1. Script tag loads (19.6KB)
+1. Script tag loads (26.1KB)
 2. Read data-* attributes from script tag
 3. Register <webclaw-overlay> custom element
 4. Create closed Shadow DOM with inline styles
@@ -182,6 +198,7 @@ The extension's `content.js` duplicates some embed script functionality (overlay
 - **Cross-site persistence** (settings and gateway URL stored in `chrome.storage`)
 - **Universal operation** (works on any website, not just WebClaw-integrated ones)
 - **Simplified DOM snapshot** (captures interactive elements for agent context)
+- **Agent negotiation protocol** (sends capabilities on connect, receives site permissions and persona via `negotiate_ack`)
 
 ### Audio Pipeline
 
@@ -281,7 +298,7 @@ CSS isolation is non-negotiable for an embed script. The alternative approaches 
 
 ### Why esbuild?
 
-The embed script must be tiny (loaded on every page view) and build instantly (developer iteration speed). esbuild delivers both: 19.6KB output in 2ms build time. Webpack and Rollup produce comparable output sizes but build 100-1000x slower.
+The embed script must be tiny (loaded on every page view) and build instantly (developer iteration speed). esbuild delivers both: 26.1KB output in 2ms build time. Webpack and Rollup produce comparable output sizes but build 100-1000x slower.
 
 ### Why Canvas 2D for the Avatar?
 
