@@ -64,8 +64,8 @@ The gateway is a **FastAPI** application serving two roles:
 
 **Concurrency model:** Each WebSocket connection spawns two concurrent tasks via `asyncio.gather()`:
 
-- **Upstream task** — reads from the WebSocket (browser), forwards to the ADK `LiveRequestQueue`
-- **Downstream task** — reads ADK events from `runner.run_live()`, forwards to the WebSocket (browser)
+- **Upstream task**: reads from the WebSocket (browser), forwards to the ADK `LiveRequestQueue`
+- **Downstream task**: reads ADK events from `runner.run_live()`, forwards to the WebSocket (browser)
 
 ```
 Browser ──WebSocket──► Upstream Task ──► LiveRequestQueue ──► Gemini

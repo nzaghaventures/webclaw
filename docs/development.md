@@ -48,7 +48,7 @@ The gateway's core dependencies:
 | `google-genai` | 1.66.0 | Google GenAI SDK |
 | `fastapi` | 0.135.1 | Async web framework |
 | `uvicorn` | 0.41.0 | ASGI server |
-| `python-dotenv` | — | Environment variable loading |
+| `python-dotenv` | - | Environment variable loading |
 
 ### Running the Gateway
 

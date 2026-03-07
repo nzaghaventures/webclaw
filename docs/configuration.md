@@ -193,9 +193,9 @@ The agent is instantiated in `gateway/agent/agent.py`:
 
 | Variable | Required | Default | Description |
 |:---------|:--------:|:--------|:------------|
-| `project_id` | ✅ | — | GCP project ID |
+| `project_id` | ✅ | - | GCP project ID |
 | `region` | | `"us-central1"` | GCP region for all resources |
-| `gemini_api_key` | ✅ | — | Passed to Cloud Run as env var |
+| `gemini_api_key` | ✅ | - | Passed to Cloud Run as env var |
 
 ## Audio Configuration
 

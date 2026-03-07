@@ -63,8 +63,8 @@ Type text into an input field.
 
 | Parameter | Type | Required | Default | Description |
 |:----------|:-----|:--------:|:--------|:------------|
-| `selector` | string | ✅ | — | CSS selector or ARIA label of the input element |
-| `text` | string | ✅ | — | The text to type into the field |
+| `selector` | string | ✅ | - | CSS selector or ARIA label of the input element |
+| `text` | string | ✅ | - | The text to type into the field |
 | `clear_first` | boolean | | `true` | Whether to clear existing content before typing |
 
 **Return value:**
@@ -123,7 +123,7 @@ Draw visual attention to an element with a glow border and optional tooltip.
 
 | Parameter | Type | Required | Default | Description |
 |:----------|:-----|:--------:|:--------|:------------|
-| `selector` | string | ✅ | — | CSS selector or ARIA label of the element to highlight |
+| `selector` | string | ✅ | - | CSS selector or ARIA label of the element to highlight |
 | `message` | string | | `""` | Optional tooltip message to show near the element |
 
 **Client-side behavior:**
@@ -182,7 +182,7 @@ Check or uncheck a checkbox element.
 
 | Parameter | Type | Required | Default | Description |
 |:----------|:-----|:--------:|:--------|:------------|
-| `selector` | string | ✅ | — | CSS selector of the checkbox element |
+| `selector` | string | ✅ | - | CSS selector of the checkbox element |
 | `checked` | boolean | | `true` | Whether to check (`true`) or uncheck (`false`) |
 
 **Client-side behavior:**

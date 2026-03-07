@@ -47,8 +47,8 @@ Returns the WebClaw embed script for inclusion in website HTML via `<script>` ta
 **Response:** JavaScript file (`application/javascript`)
 
 **Status codes:**
-- `200` — Script served successfully
-- `404` — Script not built; returns `{"error": "Embed script not built yet. Run: cd embed && npm run build"}`
+- `200`: Script served successfully
+- `404`: Script not built; returns `{"error": "Embed script not built yet. Run: cd embed && npm run build"}`
 
 **Notes:**
 - Looks for the script at `embed/dist/webclaw.js` (relative to gateway) or `gateway/static/webclaw.js`
@@ -83,7 +83,7 @@ Register a new site with WebClaw. Returns a generated `site_id`.
 
 | Field | Type | Required | Default | Description |
 |:------|:-----|:--------:|:--------|:------------|
-| `domain` | string | ✅ | — | Website domain for validation |
+| `domain` | string | ✅ | - | Website domain for validation |
 | `persona_name` | string | | `"WebClaw"` | Agent's display name |
 | `persona_voice` | string | | `"friendly and helpful"` | Voice style guidance |
 | `welcome_message` | string | | `"Hi! I'm here to help."` | First message on connect |
@@ -174,8 +174,8 @@ Returns configuration for a specific site.
 ```
 
 **Status codes:**
-- `200` — Site found
-- `404` — `{"error": "Site not found"}`
+- `200`: Site found
+- `404`: `{"error": "Site not found"}`
 
 ---
 
@@ -207,8 +207,8 @@ Update an existing site's configuration. Replaces all fields (not a partial upda
 ```
 
 **Status codes:**
-- `200` — Updated successfully
-- `404` — `{"error": "Site not found"}`
+- `200`: Updated successfully
+- `404`: `{"error": "Site not found"}`
 
 ---
 

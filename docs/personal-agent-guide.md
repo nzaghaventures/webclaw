@@ -56,7 +56,7 @@ Point this to your running gateway:
 3. Opens WebSocket to your configured gateway
 4. Captures a simplified DOM snapshot (interactive elements only)
 5. Sends snapshot to gateway for agent context
-6. Agent is ready — speak or type
+6. Agent is ready: speak or type
 ```
 
 ### Voice Interaction
@@ -103,9 +103,9 @@ The Personal Agent works everywhere. It uses the DOM snapshot and Gemini's under
 
 When you visit a site that has WebClaw's embed script installed, the Personal Agent gains additional context:
 
-- **Site knowledge base** — accurate answers to site-specific questions
-- **Configured permissions** — the agent knows what it is and isn't allowed to do
-- **Brand persona** — responses match the site's voice and style
+- **Site knowledge base**: accurate answers to site-specific questions
+- **Configured permissions**: the agent knows what it is and isn't allowed to do
+- **Brand persona**: responses match the site's voice and style
 
 The Personal Agent's private context (your preferences, history) is **never shared** with the site. See [Security & Privacy](security.md) for details.
 

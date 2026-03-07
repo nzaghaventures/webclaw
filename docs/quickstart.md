@@ -8,7 +8,7 @@ Get WebClaw running locally in 5 minutes. By the end of this guide, you will hav
 |:-----|:--------|:-------------|
 | Python | 3.10+ | [python.org](https://www.python.org/downloads/) or `brew install python` |
 | Node.js | 18+ | [nodejs.org](https://nodejs.org/) or `brew install node` |
-| Gemini API Key | — | [Google AI Studio](https://aistudio.google.com/apikey) (free) |
+| Gemini API Key | - | [Google AI Studio](https://aistudio.google.com/apikey) (free) |
 
 ## Step 1: Clone the Repository
 
@@ -154,7 +154,7 @@ Click the **microphone icon** in the chat panel to enable voice mode. Speak natu
 
 ## Next Steps
 
-- **[Site Owner Guide](site-owner-guide.md)** — Configure WebClaw for your own website
-- **[Personal Agent Guide](personal-agent-guide.md)** — Install the Chrome extension
-- **[Architecture](architecture.md)** — Understand how the components fit together
-- **[GCP Deployment](deployment-gcp.md)** — Deploy to production on Google Cloud
+- **[Site Owner Guide](site-owner-guide.md)**: Configure WebClaw for your own website
+- **[Personal Agent Guide](personal-agent-guide.md)**: Install the Chrome extension
+- **[Architecture](architecture.md)**: Understand how the components fit together
+- **[GCP Deployment](deployment-gcp.md)**: Deploy to production on Google Cloud

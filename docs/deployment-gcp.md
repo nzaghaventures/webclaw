@@ -129,9 +129,9 @@ Terraform provisions the following resources:
 
 | Variable | Type | Required | Default | Description |
 |:---------|:-----|:--------:|:--------|:------------|
-| `project_id` | string | ✅ | — | GCP project ID |
+| `project_id` | string | ✅ | - | GCP project ID |
 | `region` | string | | `"us-central1"` | GCP region |
-| `gemini_api_key` | string | ✅ | — | Gemini API key |
+| `gemini_api_key` | string | ✅ | - | Gemini API key |
 | `service_name` | string | | `"webclaw-gateway"` | Cloud Run service name |
 | `max_instances` | number | | `10` | Cloud Run max instance count |
 

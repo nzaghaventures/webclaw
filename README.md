@@ -9,7 +9,7 @@
 [![Cloud Run](https://img.shields.io/badge/Deployed%20on-Cloud%20Run-4285F4?logo=googlecloud&logoColor=white)](https://cloud.google.com/run)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**What if every website had an intelligent, voice-enabled agent that could actually *do things* for you — not just answer questions into the void?**
+**What if every website had an intelligent, voice-enabled agent that could actually *do things* for you: not just answer questions into the void?**
 
 [Quick Start](#-quick-start) · [Architecture](#-architecture) · [Demo](#-demo) · [Deploy](#-deploy-to-gcp) · [Challenge](#-challenge-entry)
 
@@ -21,11 +21,11 @@
 
 WebClaw is a **voice-first AI agent** that lives on websites. Unlike traditional chat widgets that serve canned responses, WebClaw can:
 
-- **See the page** — understands DOM structure, layout, and content in real-time
-- **Hear the user** — captures speech via microphone with real-time streaming
-- **Speak back** — responds with natural voice through Gemini's native audio
-- **Take actions** — clicks buttons, fills forms, navigates pages, highlights elements
-- **Use knowledge** — answers questions using site-specific knowledge bases
+- **See the page**: understands DOM structure, layout, and content in real-time
+- **Hear the user**: captures speech via microphone with real-time streaming
+- **Speak back**: responds with natural voice through Gemini's native audio
+- **Take actions**: clicks buttons, fills forms, navigates pages, highlights elements
+- **Use knowledge**: answers questions using site-specific knowledge bases
 
 It is not a chatbot. It is a **companion that operates the website alongside you**.
 
@@ -54,7 +54,7 @@ flowchart TB
         site["Target Website\nDOM + Content"]
     end
 
-    subgraph gateway ["WebClaw Gateway — Cloud Run"]
+    subgraph gateway ["WebClaw Gateway: Cloud Run"]
         direction TB
         ws["WebSocket Server\nFastAPI"]
         agent["ADK Agent Runtime\nGemini Live API"]
@@ -207,9 +207,9 @@ WebClaw's agent can perform 8 categories of DOM operations, each implemented as 
 | `check_checkbox` | Toggle checkboxes | "Agree to terms and conditions" |
 
 The action engine uses a **smart element finder** that tries three strategies in order:
-1. **CSS selector** — direct DOM query
-2. **ARIA label** — accessibility attribute matching
-3. **Text content** — fuzzy matching against interactive elements (buttons, links, labels)
+1. **CSS selector**: direct DOM query
+2. **ARIA label**: accessibility attribute matching
+3. **Text content**: fuzzy matching against interactive elements (buttons, links, labels)
 
 ---
 
@@ -221,7 +221,7 @@ The action engine uses a **smart element finder** that tries three strategies in
 |:-----|:--------|:--------|
 | Python | 3.10+ | Gateway backend |
 | Node.js | 18+ | Embed script build |
-| Gemini API Key | — | [Get one free](https://aistudio.google.com/apikey) |
+| Gemini API Key | - | [Get one free](https://aistudio.google.com/apikey) |
 
 ### 1. Clone & Setup
 
@@ -473,9 +473,9 @@ curl -X POST http://localhost:8081/api/sites \
 **Server → Client:**
 
 ADK events containing:
-- `content.parts[].text` — Agent text responses
-- `content.parts[].inlineData` — Audio data (PCM 24kHz, base64)
-- `content.parts[].functionCall` — DOM actions for the client to execute
+- `content.parts[].text`: Agent text responses
+- `content.parts[].inlineData`: Audio data (PCM 24kHz, base64)
+- `content.parts[].functionCall`: DOM actions for the client to execute
 
 ---
 
@@ -567,7 +567,7 @@ EVT: ['turnComplete', ...]
 |:----------|:------:|:---------------------|
 | **Innovation & Multimodal UX** | 40% | Breaks the text-box paradigm entirely. Users talk; the agent talks back AND operates the page. Animated avatar with lip-sync, DOM action visualization, voice barge-in support. Not a chatbot with a microphone icon: it is a companion that operates the website. |
 | **Technical Implementation** | 30% | Full ADK agent pipeline with Gemini Live API bidirectional audio, 8-tool DOM action engine, context broker with asymmetric privacy, Shadow DOM isolation, Canvas 2D avatar, smart element finder with CSS/ARIA/text fallback, token-efficient DOM snapshot serializer. |
-| **Demo & Presentation** | 30% | Extremely demo-friendly. "Watch the agent navigate to checkout, fill in the form, and complete the purchase — all while explaining what it is doing in natural voice." Visual, live, undeniable. |
+| **Demo & Presentation** | 30% | Extremely demo-friendly. "Watch the agent navigate to checkout, fill in the form, and complete the purchase: all while explaining what it is doing in natural voice." Visual, live, undeniable. |
 
 ---
 

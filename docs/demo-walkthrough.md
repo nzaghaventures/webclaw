@@ -183,6 +183,6 @@ Now try "Add the headphones to my cart" and the agent will explain it cannot tak
 
 ## Next Steps
 
-- [**Site Owner Guide**](site-owner-guide.md) — Register your own site
-- [**DOM Tools Reference**](api-dom-tools.md) — All available agent actions
-- [**WebSocket Protocol**](api-websocket.md) — Understanding the streaming data
+- [**Site Owner Guide**](site-owner-guide.md): Register your own site
+- [**DOM Tools Reference**](api-dom-tools.md): All available agent actions
+- [**WebSocket Protocol**](api-websocket.md): Understanding the streaming data

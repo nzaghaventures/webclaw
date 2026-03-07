@@ -186,7 +186,7 @@ document.addEventListener('click', () => {
 **Symptom:** No WebClaw icon in the toolbar after loading.
 
 **Fix:**
-1. Check `chrome://extensions` — is the extension enabled?
+1. Check `chrome://extensions`: is the extension enabled?
 2. Click the puzzle piece icon → pin WebClaw
 3. Check for errors on the extension card
 

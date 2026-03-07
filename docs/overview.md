@@ -42,11 +42,11 @@ When a Personal Agent visits a WebClaw-integrated site, the Gateway brokers cont
 
 WebClaw is built on three Google technologies:
 
-1. **Gemini Live API** — Real-time bidirectional audio streaming with native voice generation. The agent hears and speaks simultaneously through a single persistent connection. No separate STT/TTS pipeline required.
+1. **Gemini Live API**: Real-time bidirectional audio streaming with native voice generation. The agent hears and speaks simultaneously through a single persistent connection. No separate STT/TTS pipeline required.
 
-2. **Google Agent Development Kit (ADK)** — Agent lifecycle management, function-calling tool execution, session state, and the `LiveRequestQueue` abstraction for bidirectional streaming.
+2. **Google Agent Development Kit (ADK)**: Agent lifecycle management, function-calling tool execution, session state, and the `LiveRequestQueue` abstraction for bidirectional streaming.
 
-3. **Google Cloud Run** — Stateless container hosting with session affinity for WebSocket stability, auto-scaling from 0 to N instances, and sub-second cold starts.
+3. **Google Cloud Run**: Stateless container hosting with session affinity for WebSocket stability, auto-scaling from 0 to N instances, and sub-second cold starts.
 
 ## Project Structure
 
