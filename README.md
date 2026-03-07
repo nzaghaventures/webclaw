@@ -307,13 +307,16 @@ Load the extension for Personal Agent mode:
 webclaw/
 │
 ├── gateway/                    # 🐍 Python FastAPI Backend
-│   ├── main.py                 # WebSocket server, REST API, CORS
+│   ├── main.py                 # WebSocket server, REST API, CORS (v0.2.0)
 │   ├── agent/                  # ADK Agent Definition
 │   │   ├── agent.py            # Root agent (Gemini 2.0 Flash)
 │   │   ├── prompts.py          # System prompt + site-specific builder
 │   │   └── tools.py            # 8 DOM action tools (function-calling)
 │   ├── context/                # Context Broker
-│   │   └── broker.py           # Site config, knowledge base, permissions
+│   │   └── broker.py           # Site config, knowledge base, permissions, session history
+│   ├── storage/                # Persistent Storage
+│   │   ├── __init__.py
+│   │   └── firestore.py        # Firestore client (configs, sessions, knowledge, analytics)
 │   ├── voice/                  # Voice pipeline (reserved)
 │   ├── Dockerfile              # Cloud Run container (Python 3.12-slim)
 │   ├── requirements.txt        # google-adk, fastapi, uvicorn, etc.
@@ -326,17 +329,23 @@ webclaw/
 │   │   ├── audio.ts            # Mic capture (16kHz) + playback (24kHz)
 │   │   ├── avatar.ts           # Canvas 2D animated avatar (lip-sync)
 │   │   ├── dom-actions.ts      # DOM action executor (8 operations)
-│   │   └── dom-snapshot.ts     # Token-efficient DOM serializer
+│   │   ├── dom-snapshot.ts     # Token-efficient DOM serializer
+│   │   ├── action-visualizer.ts # Bezier flight animation to target elements
+│   │   └── screenshot.ts       # Canvas-based viewport capture for vision
 │   ├── dist/
-│   │   └── webclaw.js          # Bundled output (19.6KB minified)
+│   │   └── webclaw.js          # Bundled output (26.1KB minified)
 │   ├── package.json            # esbuild bundler
 │   └── tsconfig.json
+│
+├── dashboard/                  # 📊 Site Owner Dashboard
+│   └── dist/
+│       └── index.html          # Vanilla HTML/JS dashboard (no build step)
 │
 ├── extension/                  # 🔌 Chrome Extension (Manifest V3)
 │   ├── manifest.json           # Permissions: activeTab, storage, scripting
 │   ├── popup.html              # Settings UI
 │   ├── popup.js                # Gateway URL, auto-activate, voice toggle
-│   ├── content.js              # Page injection, WebSocket, DOM actions
+│   ├── content.js              # Page injection, WebSocket, DOM actions, negotiation
 │   ├── background.js           # Service worker
 │   └── icons/                  # Extension icons (16/48/128px)
 │
@@ -518,7 +527,7 @@ EVT: ['turnComplete', ...]
 | **Agent Framework** | Google ADK v1.26.0 | Agent lifecycle, tool execution, session management |
 | **Voice Streaming** | Gemini Live API | Real-time bidirectional audio (PCM 16kHz ↔ 24kHz) |
 | **Backend** | FastAPI + Uvicorn | Async WebSocket server + REST API |
-| **Embed Script** | TypeScript + esbuild | 19.6KB minified bundle, zero runtime dependencies |
+| **Embed Script** | TypeScript + esbuild | 26.1KB minified bundle, zero runtime dependencies |
 | **Overlay UI** | Web Components (Shadow DOM) | Style-isolated, framework-agnostic |
 | **Avatar** | Canvas 2D | 60fps animated face with lip-sync |
 | **Extension** | Chrome Manifest V3 | Persistent mic access, cross-site persistence |
@@ -578,7 +587,7 @@ EVT: ['turnComplete', ...]
 | **Gateway over P2P** | Provides privacy (asymmetric context), security (action validation), scalability (stateless Cloud Run), and analytics (centralized data). |
 | **Shadow DOM for overlay** | Complete style isolation from host page. WebClaw's CSS never conflicts with the site's styles, regardless of framework. |
 | **Canvas 2D over Lottie/WebGL** | Zero dependencies, <3KB of avatar code, 60fps on all devices. Good enough for lip-sync; no heavy animation library needed. |
-| **esbuild over Webpack/Rollup** | 2ms build time. 19.6KB output. The embed script must be tiny and build instantly. |
+| **esbuild over Webpack/Rollup** | 2ms build time. 26.1KB output. The embed script must be tiny and build instantly. |
 | **`<script>` tag integration** | Same pattern as Google Analytics, Intercom, and Segment. Zero friction. Site owners already know this pattern. |
 | **PCM audio over Opus/WebM** | Gemini Live API requires PCM. Direct PCM avoids encoding/decoding overhead and reduces latency. |
 | **Smart element finder** | CSS selectors alone are fragile. ARIA labels provide accessibility-aware matching. Text content matching handles "click the Buy button" naturally. |
@@ -597,11 +606,11 @@ EVT: ['turnComplete', ...]
 - [x] Demo e-commerce site
 - [x] Terraform + deploy script
 - [x] End-to-end audio streaming verified
-- [ ] Firestore persistent sessions and knowledge base
-- [ ] Site owner dashboard (config UI)
-- [ ] Action visualization (avatar moves to elements)
-- [ ] Screenshot-based page understanding (vision)
-- [ ] Agent negotiation protocol (Personal meets Site)
+- [x] Firestore persistent sessions and knowledge base
+- [x] Site owner dashboard (config UI at `/dashboard`)
+- [x] Action visualization (avatar flies to target elements via bezier curve)
+- [x] Screenshot-based page understanding (vision)
+- [x] Agent negotiation protocol (Personal meets Site)
 - [ ] Analytics pipeline (BigQuery)
 - [ ] Multi-language voice support
 
