@@ -1,9 +1,29 @@
-"""WebClaw Context Broker: Manages knowledge base and permissions between site and agent."""
+"""WebClaw Context Broker: Manages knowledge base and permissions between site and agent.
+
+Storage hierarchy:
+  1. Firestore (production, when GOOGLE_CLOUD_PROJECT is set)
+  2. In-memory dict (development fallback)
+
+Both layers stay in sync: writes go to Firestore + memory, reads hit memory first.
+"""
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+
+from storage.firestore import (
+    firestore_get_knowledge,
+    firestore_get_site,
+    firestore_list_sites,
+    firestore_set_site,
+    firestore_delete_site as fs_delete_site,
+    firestore_save_session,
+    firestore_get_session,
+    firestore_list_sessions,
+    firestore_increment_stats,
+    firestore_get_stats,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +46,12 @@ class SiteConfig:
     max_actions_per_session: int = 100
 
 
-# In-memory store for MVP; Firestore in production
+# In-memory cache (always present, syncs with Firestore)
 _site_configs: dict[str, SiteConfig] = {}
+_initialized = False
 
 # Default demo config
-_site_configs["demo"] = SiteConfig(
+_DEMO_CONFIG = SiteConfig(
     site_id="demo",
     domain="localhost",
     persona_name="Claw",
@@ -39,19 +60,57 @@ _site_configs["demo"] = SiteConfig(
 )
 
 
+def _ensure_initialized() -> None:
+    """Load configs from Firestore into memory on first access."""
+    global _initialized
+    if _initialized:
+        return
+    _initialized = True
+
+    # Load from Firestore
+    fs_sites = firestore_list_sites()
+    for site_dict in fs_sites:
+        sid = site_dict.get("site_id", "")
+        if sid:
+            try:
+                cfg = SiteConfig(**{k: v for k, v in site_dict.items() if k in SiteConfig.__dataclass_fields__})
+                _site_configs[sid] = cfg
+            except Exception as e:
+                logger.warning(f"Failed to load site {sid} from Firestore: {e}")
+
+    # Ensure demo config exists
+    if "demo" not in _site_configs:
+        _site_configs["demo"] = _DEMO_CONFIG
+
+    logger.info(f"Loaded {len(_site_configs)} site configs (Firestore + defaults)")
+
+
 def get_site_config(site_id: str) -> SiteConfig | None:
     """Retrieve configuration for a site."""
+    _ensure_initialized()
     return _site_configs.get(site_id)
 
 
 def set_site_config(config: SiteConfig) -> None:
-    """Store or update a site configuration."""
+    """Store or update a site configuration (memory + Firestore)."""
+    _ensure_initialized()
     _site_configs[config.site_id] = config
+    firestore_set_site(config.site_id, asdict(config))
     logger.info(f"Site config updated: {config.site_id} ({config.domain})")
+
+
+def delete_site_config(site_id: str) -> bool:
+    """Delete a site configuration."""
+    _ensure_initialized()
+    if site_id in _site_configs:
+        del _site_configs[site_id]
+    fs_delete_site(site_id)
+    return True
 
 
 def list_site_configs() -> list[SiteConfig]:
     """List all registered site configurations."""
+    _ensure_initialized()
     return list(_site_configs.values())
 
 
@@ -70,6 +129,7 @@ def build_agent_context(site_id: str, user_context: dict | None = None) -> dict:
     Returns:
         dict with 'system_prompt_additions' and 'permissions'.
     """
+    _ensure_initialized()
     config = get_site_config(site_id)
     if not config:
         return {
@@ -87,11 +147,77 @@ def build_agent_context(site_id: str, user_context: dict | None = None) -> dict:
     }
 
     parts = []
+
+    # Site persona
+    if config.persona_name and config.persona_name != "WebClaw":
+        parts.append(f"## Site Persona\nOn this site, your name is {config.persona_name}.")
+    if config.persona_voice:
+        parts.append(f"Voice style: {config.persona_voice}")
+    if config.welcome_message:
+        parts.append(f'When a user first connects, greet them with: "{config.welcome_message}"')
+
+    # Site knowledge (inline config)
     if config.knowledge_base:
         parts.append(f"## Site Knowledge\n{config.knowledge_base}")
 
-    if user_context and user_context.get("preferences"):
-        parts.append(f"## User Preferences\n{user_context['preferences']}")
+    # Firestore knowledge base documents (structured)
+    fs_knowledge = firestore_get_knowledge(site_id)
+    if fs_knowledge:
+        kb_parts = []
+        for doc in fs_knowledge:
+            title = doc.get("title", doc.get("id", "Untitled"))
+            content = doc.get("content", "")
+            kb_parts.append(f"### {title}\n{content}")
+        parts.append("## Knowledge Base\n" + "\n\n".join(kb_parts))
+
+    # Action permissions
+    if config.allowed_actions:
+        parts.append(f"## Allowed Actions\nYou may perform: {', '.join(config.allowed_actions)}")
+    if config.restricted_actions:
+        parts.append(f"## Restricted Actions\nDo NOT perform: {', '.join(config.restricted_actions)}")
+
+    # Personal agent context (private, never shared with site analytics)
+    if user_context:
+        if user_context.get("preferences"):
+            parts.append(f"## User Preferences (Private)\n{user_context['preferences']}")
+        if user_context.get("history_summary"):
+            parts.append(f"## Previous Interactions (Private)\n{user_context['history_summary']}")
 
     context["system_prompt_additions"] = "\n\n".join(parts)
     return context
+
+
+# ========================================
+# Session & Analytics Proxies
+# ========================================
+
+
+def save_session_history(
+    site_id: str,
+    session_id: str,
+    user_id: str,
+    messages: list[dict],
+    metadata: dict | None = None,
+) -> None:
+    """Save session conversation history to Firestore."""
+    firestore_save_session(site_id, session_id, user_id, messages, metadata)
+
+
+def get_session_history(site_id: str, session_id: str) -> dict | None:
+    """Get session history from Firestore."""
+    return firestore_get_session(site_id, session_id)
+
+
+def list_sessions(site_id: str, limit: int = 50) -> list[dict]:
+    """List recent sessions for a site."""
+    return firestore_list_sessions(site_id, limit=limit)
+
+
+def record_event(site_id: str, event: str) -> None:
+    """Record an analytics event (lightweight counter)."""
+    firestore_increment_stats(site_id, event)
+
+
+def get_site_stats(site_id: str) -> dict:
+    """Get analytics for a site."""
+    return firestore_get_stats(site_id)
