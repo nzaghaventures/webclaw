@@ -10,6 +10,7 @@ Both layers stay in sync: writes go to Firestore + memory, reads hit memory firs
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 
 from storage.firestore import (
@@ -26,6 +27,34 @@ from storage.firestore import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ========================================
+# Input Sanitization for Prompt Injection Prevention
+# ========================================
+
+def _sanitize_for_prompt(value: str, max_length: int = 5000) -> str:
+    """Sanitize string for use in system prompt (prevent prompt injection).
+
+    Does NOT strip legitimate content, but limits length and logs suspicious patterns.
+    """
+    if not isinstance(value, str):
+        value = str(value)
+
+    # Limit length
+    value = value[:max_length]
+
+    # Log suspicious patterns (but don't strip them - let the model decide)
+    suspicious_patterns = [
+        r'(?i)(ignore|forget|override|disregard).*instruction',
+        r'(?i)system.*prompt',
+        r'(?i)admin|superuser',
+    ]
+    for pattern in suspicious_patterns:
+        if re.search(pattern, value):
+            logger.warning(f"Suspicious pattern detected in prompt context: {pattern[:50]}")
+
+    return value
 
 
 @dataclass
@@ -94,9 +123,16 @@ def get_site_config(site_id: str) -> SiteConfig | None:
 def set_site_config(config: SiteConfig) -> None:
     """Store or update a site configuration (memory + Firestore)."""
     _ensure_initialized()
-    _site_configs[config.site_id] = config
-    firestore_set_site(config.site_id, asdict(config))
-    logger.info(f"Site config updated: {config.site_id} ({config.domain})")
+    try:
+        # Validate knowledge_base length
+        if len(config.knowledge_base) > 50000:
+            raise ValueError("knowledge_base exceeds max length of 50000 chars")
+        _site_configs[config.site_id] = config
+        firestore_set_site(config.site_id, asdict(config))
+        logger.info(f"Site config updated: {config.site_id} ({config.domain})")
+    except Exception as e:
+        logger.error(f"Error setting site config for {config.site_id}: {e}", exc_info=True)
+        raise
 
 
 def delete_site_config(site_id: str) -> bool:
@@ -129,62 +165,78 @@ def build_agent_context(site_id: str, user_context: dict | None = None) -> dict:
     Returns:
         dict with 'system_prompt_additions' and 'permissions'.
     """
-    _ensure_initialized()
-    config = get_site_config(site_id)
-    if not config:
+    try:
+        _ensure_initialized()
+        config = get_site_config(site_id)
+        if not config:
+            return {
+                "system_prompt_additions": "",
+                "permissions": {"allowed_actions": ["read", "highlight", "scroll"]},
+            }
+
+        context: dict = {
+            "system_prompt_additions": "",
+            "permissions": {
+                "allowed_actions": config.allowed_actions,
+                "restricted_actions": config.restricted_actions,
+                "max_actions": config.max_actions_per_session,
+            },
+        }
+
+        parts = []
+
+        # Site persona - sanitize to prevent prompt injection
+        if config.persona_name and config.persona_name != "WebClaw":
+            safe_name = _sanitize_for_prompt(config.persona_name, 200)
+            parts.append(f"## Site Persona\nOn this site, your name is {safe_name}.")
+        if config.persona_voice:
+            safe_voice = _sanitize_for_prompt(config.persona_voice, 500)
+            parts.append(f"Voice style: {safe_voice}")
+        if config.welcome_message:
+            safe_msg = _sanitize_for_prompt(config.welcome_message, 500)
+            parts.append(f'When a user first connects, greet them with: "{safe_msg}"')
+
+        # Site knowledge (inline config)
+        if config.knowledge_base:
+            safe_kb = _sanitize_for_prompt(config.knowledge_base, 50000)
+            parts.append(f"## Site Knowledge\n{safe_kb}")
+
+        # Firestore knowledge base documents (structured)
+        fs_knowledge = firestore_get_knowledge(site_id)
+        if fs_knowledge:
+            kb_parts = []
+            for doc in fs_knowledge:
+                title = doc.get("title", doc.get("id", "Untitled"))
+                content = doc.get("content", "")
+                safe_title = _sanitize_for_prompt(title, 200)
+                safe_content = _sanitize_for_prompt(content, 50000)
+                kb_parts.append(f"### {safe_title}\n{safe_content}")
+            parts.append("## Knowledge Base\n" + "\n\n".join(kb_parts))
+
+        # Action permissions
+        if config.allowed_actions:
+            parts.append(f"## Allowed Actions\nYou may perform: {', '.join(config.allowed_actions)}")
+        if config.restricted_actions:
+            parts.append(f"## Restricted Actions\nDo NOT perform: {', '.join(config.restricted_actions)}")
+
+        # Personal agent context (private, never shared with site analytics)
+        if user_context:
+            if user_context.get("preferences"):
+                safe_prefs = _sanitize_for_prompt(user_context['preferences'], 5000)
+                parts.append(f"## User Preferences (Private)\n{safe_prefs}")
+            if user_context.get("history_summary"):
+                safe_hist = _sanitize_for_prompt(user_context['history_summary'], 5000)
+                parts.append(f"## Previous Interactions (Private)\n{safe_hist}")
+
+        context["system_prompt_additions"] = "\n\n".join(parts)
+        logger.info(f"Built agent context for site {site_id}")
+        return context
+    except Exception as e:
+        logger.error(f"Error building agent context for {site_id}: {e}", exc_info=True)
         return {
             "system_prompt_additions": "",
             "permissions": {"allowed_actions": ["read", "highlight", "scroll"]},
         }
-
-    context: dict = {
-        "system_prompt_additions": "",
-        "permissions": {
-            "allowed_actions": config.allowed_actions,
-            "restricted_actions": config.restricted_actions,
-            "max_actions": config.max_actions_per_session,
-        },
-    }
-
-    parts = []
-
-    # Site persona
-    if config.persona_name and config.persona_name != "WebClaw":
-        parts.append(f"## Site Persona\nOn this site, your name is {config.persona_name}.")
-    if config.persona_voice:
-        parts.append(f"Voice style: {config.persona_voice}")
-    if config.welcome_message:
-        parts.append(f'When a user first connects, greet them with: "{config.welcome_message}"')
-
-    # Site knowledge (inline config)
-    if config.knowledge_base:
-        parts.append(f"## Site Knowledge\n{config.knowledge_base}")
-
-    # Firestore knowledge base documents (structured)
-    fs_knowledge = firestore_get_knowledge(site_id)
-    if fs_knowledge:
-        kb_parts = []
-        for doc in fs_knowledge:
-            title = doc.get("title", doc.get("id", "Untitled"))
-            content = doc.get("content", "")
-            kb_parts.append(f"### {title}\n{content}")
-        parts.append("## Knowledge Base\n" + "\n\n".join(kb_parts))
-
-    # Action permissions
-    if config.allowed_actions:
-        parts.append(f"## Allowed Actions\nYou may perform: {', '.join(config.allowed_actions)}")
-    if config.restricted_actions:
-        parts.append(f"## Restricted Actions\nDo NOT perform: {', '.join(config.restricted_actions)}")
-
-    # Personal agent context (private, never shared with site analytics)
-    if user_context:
-        if user_context.get("preferences"):
-            parts.append(f"## User Preferences (Private)\n{user_context['preferences']}")
-        if user_context.get("history_summary"):
-            parts.append(f"## Previous Interactions (Private)\n{user_context['history_summary']}")
-
-    context["system_prompt_additions"] = "\n\n".join(parts)
-    return context
 
 
 # ========================================
