@@ -9,6 +9,11 @@ export async function api<T = Record<string, unknown>>(
     method: opts.method || 'GET',
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
+
+  if (!res.ok) {
+    throw new Error(`API error: ${res.status} ${res.statusText}`);
+  }
+
   return res.json();
 }
 
