@@ -16,8 +16,10 @@ export class Avatar {
   private isBlinking: boolean = false;
   private pulsePhase: number = 0;
   private bounceY: number = 0;
+  private breatheScale: number = 1;
   private color: string;
   private size: number;
+  private lastFrameTime: number = performance.now();
 
   // Audio analysis for lip sync
   private analyser: AnalyserNode | null = null;
@@ -52,21 +54,25 @@ export class Avatar {
 
   private startAnimation(): void {
     const animate = () => {
+      this.animFrame = requestAnimationFrame(animate);
       this.update();
       this.draw();
-      this.animFrame = requestAnimationFrame(animate);
     };
-    animate();
+    this.animFrame = requestAnimationFrame(animate);
   }
 
   private update(): void {
-    // Smooth mouth movement
-    const speed = 0.3;
-    this.mouthOpenness += (this.targetMouthOpenness - this.mouthOpenness) * speed;
+    const now = performance.now();
+    const deltaTime = (now - this.lastFrameTime) / 16.67; // Normalize to 60fps frame time
+    this.lastFrameTime = now;
+
+    // Exponential smoothing for mouth (slower, more natural)
+    const mouthSpeed = Math.pow(0.7, deltaTime); // Exponential decay
+    this.mouthOpenness = this.mouthOpenness * mouthSpeed + this.targetMouthOpenness * (1 - mouthSpeed);
 
     // Audio-driven mouth
     if (this.analyser && this.analyserData && this.state === 'speaking') {
-      this.analyser.getByteFrequencyData(this.analyserData);
+      this.analyser.getByteFrequencyData(this.analyserData as Uint8Array<ArrayBuffer>);
       // Average low frequencies for speech
       let sum = 0;
       const count = Math.min(16, this.analyserData.length);
@@ -76,7 +82,7 @@ export class Avatar {
 
     // Simulated mouth movement when speaking without analyser
     if (this.state === 'speaking' && !this.analyser) {
-      this.targetMouthOpenness = 0.3 + Math.sin(Date.now() * 0.015) * 0.3 + Math.sin(Date.now() * 0.023) * 0.2;
+      this.targetMouthOpenness = 0.3 + Math.sin(now * 0.015) * 0.3 + Math.sin(now * 0.023) * 0.2;
     } else if (this.state !== 'speaking') {
       this.targetMouthOpenness = 0;
     }
@@ -92,15 +98,22 @@ export class Avatar {
     }
 
     // Pulse phase (for listening/thinking states)
-    this.pulsePhase += 0.05;
+    this.pulsePhase += 0.05 * deltaTime;
 
     // Gentle bounce
     if (this.state === 'speaking') {
-      this.bounceY = Math.sin(Date.now() * 0.003) * 1.5;
+      this.bounceY = Math.sin(now * 0.003) * 1.5;
     } else if (this.state === 'listening') {
-      this.bounceY = Math.sin(Date.now() * 0.002) * 1;
+      this.bounceY = Math.sin(now * 0.002) * 1;
     } else {
       this.bounceY *= 0.95;
+    }
+
+    // Subtle idle breathing animation (very slight scale oscillation)
+    if (this.state === 'idle') {
+      this.breatheScale = 1 + Math.sin(now * 0.0008) * 0.015;
+    } else {
+      this.breatheScale = 1;
     }
   }
 
@@ -109,7 +122,10 @@ export class Avatar {
     const s = this.size;
     const cx = s / 2;
     const cy = s / 2 + this.bounceY;
-    const r = s * 0.38;
+    let r = s * 0.38;
+
+    // Apply breathing scale
+    r *= this.breatheScale;
 
     ctx.clearRect(0, 0, s, s);
 
@@ -213,6 +229,11 @@ export class Avatar {
   destroy(): void {
     cancelAnimationFrame(this.animFrame);
     this.analyser?.disconnect();
+  }
+
+  /** Alias for destroy() for consistency */
+  dispose(): void {
+    this.destroy();
   }
 }
 

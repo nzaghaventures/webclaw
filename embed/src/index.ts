@@ -14,7 +14,7 @@ import { AudioHandler } from './audio';
 import { Avatar, AvatarState } from './avatar';
 import { executeAction } from './dom-actions';
 import { captureSnapshot } from './dom-snapshot';
-import { animateToElement } from './action-visualizer';
+import { animateToElement, cleanupVisualizerElements } from './action-visualizer';
 import { captureScreenshot } from './screenshot';
 
 // ========================================
@@ -91,7 +91,15 @@ const OVERLAY_STYLES = `
     color: white;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 10px;
+  }
+
+  .webclaw-panel-header-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
   }
 
   .webclaw-panel-header h3 {
@@ -102,6 +110,48 @@ const OVERLAY_STYLES = `
     font-size: 12px; opacity: 0.8;
   }
 
+  .webclaw-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4CAF50;
+    animation: none;
+  }
+
+  .webclaw-status-dot.connecting {
+    background: #FFC107;
+    animation: webclaw-blink 1s infinite;
+  }
+
+  .webclaw-status-dot.disconnected {
+    background: #F44336;
+  }
+
+  .webclaw-btn-close {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background 0.2s;
+  }
+
+  .webclaw-btn-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  @keyframes webclaw-blink {
+    0%, 49%, 100% { opacity: 1; }
+    50%, 99% { opacity: 0.5; }
+  }
+
   .webclaw-messages {
     flex: 1;
     overflow-y: auto;
@@ -110,8 +160,14 @@ const OVERLAY_STYLES = `
     max-height: 320px;
   }
 
-  .webclaw-msg {
+  .webclaw-msg-wrapper {
+    display: flex;
+    flex-direction: column;
     margin-bottom: 12px;
+    gap: 4px;
+  }
+
+  .webclaw-msg {
     padding: 10px 14px;
     border-radius: 12px;
     font-size: 14px;
@@ -126,11 +182,30 @@ const OVERLAY_STYLES = `
     border-bottom-left-radius: 4px;
   }
 
+  .webclaw-msg.typing {
+    background: #f0f0f0;
+    align-self: flex-start;
+    border-bottom-left-radius: 4px;
+    font-style: italic;
+    opacity: 0.7;
+  }
+
   .webclaw-msg.user {
     background: var(--wc-color, #FF4D4D);
     color: white;
     margin-left: auto;
     border-bottom-right-radius: 4px;
+  }
+
+  .webclaw-msg-timestamp {
+    font-size: 11px;
+    opacity: 0.6;
+    padding: 0 14px;
+    align-self: flex-start;
+  }
+
+  .webclaw-msg.user ~ .webclaw-msg-timestamp {
+    align-self: flex-end;
   }
 
   .webclaw-input-row {
@@ -150,6 +225,11 @@ const OVERLAY_STYLES = `
     background: transparent;
   }
 
+  .webclaw-input-row input:focus {
+    outline: 1px solid #e0e0e0;
+    outline-offset: -1px;
+  }
+
   .webclaw-btn-mic {
     width: 40px; height: 40px;
     border-radius: 50%;
@@ -164,6 +244,10 @@ const OVERLAY_STYLES = `
   }
 
   .webclaw-btn-mic:hover { transform: scale(1.05); }
+  .webclaw-btn-mic:focus {
+    outline: 2px solid #333;
+    outline-offset: 2px;
+  }
   .webclaw-btn-mic.active {
     background: #ea4335;
     animation: webclaw-pulse-mic 1.5s infinite;
@@ -228,9 +312,12 @@ class WebClawEmbed {
   private shadow!: ShadowRoot;
   private panel!: HTMLElement;
   private messagesEl!: HTMLElement;
+  private statusDot!: HTMLElement;
   private avatar: Avatar | null = null;
   private isMicActive = false;
   private isOpen = false;
+  private typingIndicator: HTMLElement | null = null;
+  private connectionState: 'connected' | 'connecting' | 'disconnected' = 'disconnected';
 
   constructor(config: WebClawConfig) {
     this.config = config;
@@ -257,23 +344,33 @@ class WebClawEmbed {
     container.innerHTML = `
       <div class="webclaw-panel">
         <div class="webclaw-panel-header">
-          <canvas id="wc-avatar" width="36" height="36" style="border-radius:50%;"></canvas>
-          <div>
-            <h3>WebClaw</h3>
-            <div class="status">Ready to help</div>
+          <div class="webclaw-panel-header-content">
+            <canvas id="wc-avatar" width="36" height="36" style="border-radius:50%;"></canvas>
+            <div>
+              <h3>WebClaw</h3>
+              <div class="status">
+                <span class="webclaw-status-dot"></span>
+                <span class="status-text">Ready to help</span>
+              </div>
+            </div>
           </div>
+          <button class="webclaw-btn-close" aria-label="Close WebClaw chat panel" title="Close">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/>
+            </svg>
+          </button>
         </div>
         <div class="webclaw-messages"></div>
         <div class="webclaw-input-row">
-          <input type="text" placeholder="Type a message..." />
-          <button class="webclaw-btn-mic" title="Hold to talk">
+          <input type="text" placeholder="Type a message..." aria-label="Chat message input" />
+          <button class="webclaw-btn-mic" aria-label="Send audio message - hold to record" title="Hold to talk">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
             </svg>
           </button>
         </div>
       </div>
-      <button class="webclaw-fab" title="Chat with WebClaw">
+      <button class="webclaw-fab" aria-label="Open WebClaw chat" title="Chat with WebClaw">
         <canvas id="wc-fab-avatar" width="40" height="40" style="border-radius:50%;"></canvas>
       </button>
     `;
@@ -284,10 +381,14 @@ class WebClawEmbed {
     // Cache references
     this.panel = container.querySelector('.webclaw-panel')!;
     this.messagesEl = container.querySelector('.webclaw-messages')!;
+    this.statusDot = container.querySelector('.webclaw-status-dot')!;
 
     // Event listeners
     const fab = container.querySelector('.webclaw-fab')!;
     fab.addEventListener('click', () => this.toggle());
+
+    const closeBtn = container.querySelector('.webclaw-btn-close')!;
+    closeBtn.addEventListener('click', () => this.close());
 
     // Initialize avatar on FAB
     const fabCanvas = container.querySelector('#wc-fab-avatar') as HTMLCanvasElement;
@@ -309,8 +410,10 @@ class WebClawEmbed {
 
   private bindGatewayEvents(): void {
     this.gateway.on('connected', () => {
+      this.setConnectionState('connected');
       this.setStatus('Connected');
       this.avatar?.setState('idle');
+      this.removeTypingIndicator();
       const snapshot = captureSnapshot();
       this.gateway.sendDomSnapshot(snapshot, window.location.href);
 
@@ -319,11 +422,14 @@ class WebClawEmbed {
     });
 
     this.gateway.on('disconnected', () => {
+      this.setConnectionState('disconnected');
       this.setStatus('Reconnecting...');
       this.avatar?.setState('idle');
+      this.removeTypingIndicator();
     });
 
     this.gateway.on('text', (msg) => {
+      this.removeTypingIndicator();
       this.addMessage('agent', msg.text as string);
       this.avatar?.setState('speaking');
       // Return to idle after a delay
@@ -331,6 +437,7 @@ class WebClawEmbed {
     });
 
     this.gateway.on('audio', (msg) => {
+      this.removeTypingIndicator();
       this.avatar?.setState('speaking');
       this.audio.playAudio(msg.data as string);
       // Audio playback will last a while; return to idle after
@@ -338,6 +445,8 @@ class WebClawEmbed {
     });
 
     this.gateway.on('action', async (msg) => {
+      this.removeTypingIndicator();
+      this.showTypingIndicator();
       this.avatar?.setState('acting');
       const selector = (msg.args as Record<string, unknown>)?.selector as string || msg.selector as string || '';
 
@@ -354,14 +463,19 @@ class WebClawEmbed {
       }
 
       // Execute DOM action and send result back
-      const result = executeAction({
-        action: msg.action as string,
-        id: msg.id as string,
-        ...(msg.args as Record<string, unknown> || {}),
-      });
-      this.gateway.sendActionResult(result.action_id, result);
-      // Show action feedback
-      this.addMessage('agent', `⚡ ${result.message || result.action_id}`);
+      try {
+        const result = await executeAction({
+          action: msg.action as string,
+          id: msg.id as string,
+          ...(msg.args as Record<string, unknown> || {}),
+        });
+        this.gateway.sendActionResult(result.action_id, result);
+        // Show action feedback
+        this.addMessage('agent', `⚡ ${result.message || result.action_id}`);
+      } catch (e: any) {
+        this.addMessage('agent', `⚡ Action error: ${e.message}`);
+      }
+      this.removeTypingIndicator();
       setTimeout(() => this.avatar?.setState('idle'), 1000);
     });
   }
@@ -370,14 +484,24 @@ class WebClawEmbed {
     this.isOpen = !this.isOpen;
     this.panel.classList.toggle('open', this.isOpen);
 
-    if (this.isOpen && !this.gateway['ws']) {
+    if (this.isOpen && this.connectionState === 'disconnected') {
+      this.setConnectionState('connecting');
       this.setStatus('Connecting...');
       try {
         await this.gateway.connect();
-      } catch {
+      } catch (e: any) {
+        this.setConnectionState('disconnected');
         this.setStatus('Connection failed');
+        console.error('[WebClaw] Connection error:', e);
       }
     }
+  }
+
+  private close(): void {
+    this.isOpen = false;
+    this.panel.classList.remove('open');
+    this.removeTypingIndicator();
+    cleanupVisualizerElements();
   }
 
   private sendText(text: string): void {
@@ -406,16 +530,73 @@ class WebClawEmbed {
   }
 
   private addMessage(role: 'user' | 'agent', text: string): void {
+    // Create wrapper for message and timestamp
+    const wrapper = document.createElement('div');
+    wrapper.className = 'webclaw-msg-wrapper';
+
+    // Create message element
     const msg = document.createElement('div');
     msg.className = `webclaw-msg ${role}`;
     msg.textContent = text;
-    this.messagesEl.appendChild(msg);
+
+    // Create timestamp
+    const timestamp = document.createElement('div');
+    timestamp.className = 'webclaw-msg-timestamp';
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    timestamp.textContent = timeStr;
+
+    wrapper.appendChild(msg);
+    wrapper.appendChild(timestamp);
+    this.messagesEl.appendChild(wrapper);
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }
 
+  private showTypingIndicator(): void {
+    if (this.typingIndicator) return; // Already showing
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'webclaw-msg-wrapper';
+
+    const indicator = document.createElement('div');
+    indicator.className = 'webclaw-msg typing';
+    indicator.textContent = 'Agent is thinking...';
+
+    const timestamp = document.createElement('div');
+    timestamp.className = 'webclaw-msg-timestamp';
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    timestamp.textContent = timeStr;
+
+    wrapper.appendChild(indicator);
+    wrapper.appendChild(timestamp);
+    this.messagesEl.appendChild(wrapper);
+    this.typingIndicator = wrapper;
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  private removeTypingIndicator(): void {
+    if (this.typingIndicator) {
+      this.typingIndicator.remove();
+      this.typingIndicator = null;
+    }
+  }
+
   private setStatus(text: string): void {
-    const status = this.shadow.querySelector('.status');
-    if (status) status.textContent = text;
+    const statusText = this.shadow.querySelector('.status-text');
+    if (statusText) statusText.textContent = text;
+  }
+
+  private setConnectionState(state: 'connected' | 'connecting' | 'disconnected'): void {
+    this.connectionState = state;
+
+    // Update status dot appearance
+    this.statusDot.classList.remove('connecting', 'disconnected');
+    if (state === 'connecting') {
+      this.statusDot.classList.add('connecting');
+    } else if (state === 'disconnected') {
+      this.statusDot.classList.add('disconnected');
+    }
   }
 
   private async sendScreenshotToGateway(): Promise<void> {

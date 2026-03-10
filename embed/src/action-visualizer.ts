@@ -4,6 +4,8 @@
  * Creates a visual trail from the FAB to the target, with a pulse on arrival.
  */
 
+import { findElement } from './element-finder';
+
 export interface VisualizerConfig {
   color: string;
   duration: number;   // ms
@@ -132,7 +134,7 @@ export function animateToElement(
         requestAnimationFrame(animate);
       } else {
         // Arrival: pulse effect on target
-        pulseTarget(target, cfg.color);
+        pulseTarget(target!, cfg.color);
 
         // Fade out indicator and trails
         indicator.style.transition = 'opacity 0.3s, transform 0.3s';
@@ -154,6 +156,19 @@ export function animateToElement(
 
     requestAnimationFrame(animate);
   });
+}
+
+/**
+ * Clean up any lingering DOM elements from visualizer operations.
+ */
+export function cleanupVisualizerElements(): void {
+  // Remove any leftover indicators
+  const indicators = document.querySelectorAll('.webclaw-action-indicator');
+  indicators.forEach(el => el.remove());
+
+  // Remove any leftover pulses
+  const pulses = document.querySelectorAll('[style*="webclaw-target-pulse"]');
+  pulses.forEach(el => el.remove());
 }
 
 /**
@@ -204,20 +219,8 @@ function pulseTarget(element: Element, color: string): void {
 }
 
 /**
- * Find target element using the same strategy as dom-actions.
+ * Find target element using the shared element finder utility.
  */
 function findTarget(selector: string): Element | null {
-  let el = document.querySelector(selector);
-  if (el) return el;
-
-  el = document.querySelector(`[aria-label="${selector}"]`);
-  if (el) return el;
-
-  const candidates = document.querySelectorAll('a, button, [role="button"], label, input');
-  for (const c of candidates) {
-    if (c.textContent?.trim().toLowerCase().includes(selector.toLowerCase())) {
-      return c;
-    }
-  }
-  return null;
+  return findElement(selector);
 }

@@ -28,6 +28,7 @@ const SKIP_TAGS = new Set([
 const IMPORTANT_ATTRS = new Set([
   'href', 'src', 'alt', 'title', 'placeholder', 'aria-label',
   'type', 'name', 'id', 'role', 'value', 'action', 'method',
+  'data-testid', 'data-cy', // Common test selectors
 ]);
 
 /**
@@ -36,6 +37,16 @@ const IMPORTANT_ATTRS = new Set([
  */
 export function captureSnapshot(maxLength: number = 4000): string {
   const tree = walkNode(document.body, 0, 3);
+  const text = serializeTree(tree);
+  return text.substring(0, maxLength);
+}
+
+/**
+ * Capture a snapshot focusing only on interactive elements.
+ * Returns a smaller, more focused snapshot for the agent.
+ */
+export function captureInteractiveSnapshot(maxLength: number = 3000): string {
+  const tree = walkInteractiveNode(document.body, 0, 4);
   const text = serializeTree(tree);
   return text.substring(0, maxLength);
 }
@@ -77,6 +88,14 @@ function walkNode(node: Node, depth: number, maxDepth: number): SnapshotNode | n
   const children: SnapshotNode[] = [];
   const childDepth = isImportant ? depth : depth + 1;
 
+  // Check for shadow DOM
+  if (el.shadowRoot) {
+    for (const child of el.shadowRoot.childNodes) {
+      const childNode = walkNode(child, childDepth, maxDepth);
+      if (childNode) children.push(childNode);
+    }
+  }
+
   for (const child of el.childNodes) {
     const childNode = walkNode(child, childDepth, maxDepth);
     if (childNode) children.push(childNode);
@@ -91,6 +110,83 @@ function walkNode(node: Node, depth: number, maxDepth: number): SnapshotNode | n
       result.text = text;
     } else {
       return null;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Walk only interactive elements for a focused snapshot.
+ */
+function walkInteractiveNode(node: Node, depth: number, maxDepth: number): SnapshotNode | null {
+  if (depth > maxDepth) return null;
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = (node.textContent || '').trim();
+    if (text.length > 0 && text.length < 200) {
+      return { tag: '#text', text };
+    }
+    return null;
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE) return null;
+
+  const el = node as Element;
+  const tag = el.tagName.toLowerCase();
+
+  if (SKIP_TAGS.has(tag)) return null;
+  if (el.getAttribute('aria-hidden') === 'true') return null;
+  if (el.closest('[aria-hidden="true"]')) return null;
+
+  const isInteractive = INTERACTIVE_TAGS.has(tag);
+  if (!isInteractive && tag !== 'body' && tag !== 'html') {
+    // Skip non-interactive unless it contains interactive children
+    let hasInteractiveChild = false;
+    for (const child of el.childNodes) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const childTag = (child as Element).tagName.toLowerCase();
+        if (INTERACTIVE_TAGS.has(childTag)) {
+          hasInteractiveChild = true;
+          break;
+        }
+      }
+    }
+    if (!hasInteractiveChild) return null;
+  }
+
+  const result: SnapshotNode = { tag };
+
+  // Collect important attributes
+  const attrs: Record<string, string> = {};
+  for (const attr of IMPORTANT_ATTRS) {
+    const val = el.getAttribute(attr);
+    if (val) attrs[attr] = val.substring(0, 100);
+  }
+  if (Object.keys(attrs).length > 0) result.attrs = attrs;
+
+  // Process children
+  const children: SnapshotNode[] = [];
+
+  // Check for shadow DOM
+  if (el.shadowRoot) {
+    for (const child of el.shadowRoot.childNodes) {
+      const childNode = walkInteractiveNode(child, depth + 1, maxDepth);
+      if (childNode) children.push(childNode);
+    }
+  }
+
+  for (const child of el.childNodes) {
+    const childNode = walkInteractiveNode(child, depth + 1, maxDepth);
+    if (childNode) children.push(childNode);
+  }
+
+  if (children.length > 0) {
+    result.children = children;
+  } else if (isInteractive) {
+    const text = (el.textContent || '').trim();
+    if (text.length > 0 && text.length < 200) {
+      result.text = text;
     }
   }
 
