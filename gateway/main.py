@@ -4,13 +4,16 @@ import asyncio
 import base64
 import json
 import logging
+import re
 import time
 import uuid
 import warnings
+from collections import defaultdict
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,7 +22,7 @@ from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 # Load environment variables
 load_dotenv(Path(__file__).parent / ".env")
@@ -40,6 +43,7 @@ from context.broker import (  # noqa: E402
     set_site_config,
 )
 from storage.firestore import (  # noqa: E402
+    check_health,
     firestore_delete_knowledge,
     firestore_get_knowledge,
     firestore_set_knowledge,
@@ -56,6 +60,56 @@ warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 APP_NAME = "webclaw-gateway"
 
 # ========================================
+# Input Validation & Sanitization
+# ========================================
+
+def validate_site_id(site_id: str) -> bool:
+    """Validate site_id format (alphanumeric, hyphen, underscore, 1-50 chars)."""
+    return bool(re.match(r'^[a-zA-Z0-9_-]{1,50}$', site_id))
+
+
+def validate_url(url: str) -> bool:
+    """Validate URL is http/https only."""
+    return url.startswith(('http://', 'https://'))
+
+
+def sanitize_string(value: str, max_length: int = 5000) -> str:
+    """Sanitize user input string."""
+    if not isinstance(value, str):
+        value = str(value)
+    # Limit length
+    value = value[:max_length]
+    return value
+
+
+# ========================================
+# Rate Limiter (in-memory, per IP)
+# ========================================
+
+class RateLimiter:
+    """Simple in-memory rate limiter: max 60 requests per minute per IP."""
+
+    def __init__(self, max_requests: int = 60, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.requests: dict[str, list[float]] = defaultdict(list)
+
+    def is_allowed(self, ip: str) -> bool:
+        """Check if IP is allowed to make a request."""
+        now = time.time()
+        # Clean old requests
+        self.requests[ip] = [ts for ts in self.requests[ip] if now - ts < self.window_seconds]
+        # Check limit
+        if len(self.requests[ip]) >= self.max_requests:
+            return False
+        self.requests[ip].append(now)
+        return True
+
+
+rate_limiter = RateLimiter()
+
+
+# ========================================
 # App setup
 # ========================================
 
@@ -65,13 +119,69 @@ app = FastAPI(
     version="0.2.0",
 )
 
+# ========================================
+# CORS Configuration
+# ========================================
+
+# Get CORS origins from environment variable, default to "*"
+import os
+cors_origins = os.environ.get("CORS_ORIGINS", "*").split(",")
+cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Embed script runs on any domain
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ========================================
+# Error Handler Middleware
+# ========================================
+
+@app.middleware("http")
+async def error_handler_middleware(request: Request, call_next):
+    """Middleware for consistent error handling and request logging."""
+    start_time = time.time()
+    request_id = str(uuid.uuid4())[:8]
+
+    # Extract client IP
+    client_ip = request.client.host if request.client else "unknown"
+
+    try:
+        # Rate limiting
+        if not rate_limiter.is_allowed(client_ip):
+            logger.warning(f"[{request_id}] Rate limit exceeded: {client_ip}")
+            return JSONResponse(
+                {"error": "Rate limit exceeded", "request_id": request_id},
+                status_code=429,
+            )
+
+        # Log request
+        logger.info(f"[{request_id}] {request.method} {request.url.path} from {client_ip}")
+
+        response = await call_next(request)
+
+        # Log response with timing
+        duration_ms = (time.time() - start_time) * 1000
+        logger.info(
+            f"[{request_id}] {request.method} {request.url.path} "
+            f"status={response.status_code} duration={duration_ms:.1f}ms"
+        )
+
+        return response
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+        logger.error(
+            f"[{request_id}] Unhandled error in {request.method} {request.url.path}: {e}",
+            exc_info=True,
+        )
+        return JSONResponse(
+            {"error": "Internal server error", "request_id": request_id},
+            status_code=500,
+        )
 
 # Session + Runner
 session_service = InMemorySessionService()
@@ -109,6 +219,31 @@ async def health():
     return {"status": "ok", "service": "webclaw-gateway", "version": "0.2.0"}
 
 
+@app.get("/api/health")
+async def api_health():
+    """Health check endpoint that also verifies Firestore connectivity."""
+    try:
+        firestore_ok = check_health()
+        return {
+            "status": "ok",
+            "service": "webclaw-gateway",
+            "version": "0.2.0",
+            "firestore": "connected" if firestore_ok else "disconnected",
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}", exc_info=True)
+        return JSONResponse(
+            {
+                "status": "degraded",
+                "service": "webclaw-gateway",
+                "version": "0.2.0",
+                "firestore": "error",
+                "error": str(e),
+            },
+            status_code=503,
+        )
+
+
 @app.get("/embed.js")
 async def serve_embed_script():
     """Serve the embed script for site integration."""
@@ -142,51 +277,138 @@ class SiteConfigCreate(BaseModel):
     escalation_email: str = ""
     max_actions_per_session: int = 100
 
+    @field_validator("domain")
+    @classmethod
+    def validate_domain(cls, v):
+        if not v or len(v) > 255:
+            raise ValueError("domain must be 1-255 characters")
+        return sanitize_string(v, 255)
+
+    @field_validator("persona_name", "persona_voice", "welcome_message", "knowledge_base")
+    @classmethod
+    def validate_strings(cls, v):
+        if isinstance(v, str) and len(v) > 5000:
+            raise ValueError("string too long (max 5000 chars)")
+        return sanitize_string(v, 5000)
+
+    @field_validator("escalation_email")
+    @classmethod
+    def validate_email(cls, v):
+        if v and "@" not in v:
+            raise ValueError("invalid email format")
+        return sanitize_string(v, 255)
+
+    @field_validator("max_actions_per_session")
+    @classmethod
+    def validate_max_actions(cls, v):
+        if v < 1 or v > 1000:
+            raise ValueError("max_actions_per_session must be 1-1000")
+        return v
+
 
 @app.post("/api/sites")
 async def create_site(config: SiteConfigCreate):
     """Register a new site with WebClaw."""
-    site_id = str(uuid.uuid4())[:8]
-    site_config = SiteConfig(site_id=site_id, **config.model_dump())
-    set_site_config(site_config)
-    record_event(site_id, "site_created")
-    return {"site_id": site_id, "config": vars(site_config)}
+    try:
+        site_id = str(uuid.uuid4())[:8]
+        site_config = SiteConfig(site_id=site_id, **config.model_dump())
+        set_site_config(site_config)
+        record_event(site_id, "site_created")
+        logger.info(f"Site created: {site_id} for domain {config.domain}")
+        return {"site_id": site_id, "config": vars(site_config)}
+    except Exception as e:
+        logger.error(f"Error creating site: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Failed to create site", "details": str(e)},
+            status_code=400,
+        )
 
 
 @app.get("/api/sites")
-async def list_sites():
+async def list_sites(limit: int = 50):
     """List all registered sites."""
-    return {"sites": [vars(c) for c in list_site_configs()]}
+    try:
+        # Validate limit parameter
+        limit = max(1, min(limit, 100))  # Clamp to 1-100
+        configs = list_site_configs()
+        return {"sites": [vars(c) for c in configs[:limit]]}
+    except Exception as e:
+        logger.error(f"Error listing sites: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Failed to list sites"},
+            status_code=500,
+        )
 
 
 @app.get("/api/sites/{site_id}")
 async def get_site(site_id: str):
     """Get configuration for a specific site."""
-    config = get_site_config(site_id)
-    if not config:
-        return JSONResponse({"error": "Site not found"}, status_code=404)
-    return {"config": vars(config)}
+    try:
+        # Validate site_id
+        if not validate_site_id(site_id):
+            return JSONResponse(
+                {"error": "Invalid site_id format"},
+                status_code=400,
+            )
+        config = get_site_config(site_id)
+        if not config:
+            return JSONResponse({"error": "Site not found"}, status_code=404)
+        return {"config": vars(config)}
+    except Exception as e:
+        logger.error(f"Error getting site {site_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Failed to get site"},
+            status_code=500,
+        )
 
 
 @app.put("/api/sites/{site_id}")
 async def update_site(site_id: str, updates: SiteConfigCreate):
     """Update a site's configuration."""
-    existing = get_site_config(site_id)
-    if not existing:
-        return JSONResponse({"error": "Site not found"}, status_code=404)
-    updated = SiteConfig(site_id=site_id, **updates.model_dump())
-    set_site_config(updated)
-    return {"config": vars(updated)}
+    try:
+        # Validate site_id
+        if not validate_site_id(site_id):
+            return JSONResponse(
+                {"error": "Invalid site_id format"},
+                status_code=400,
+            )
+        existing = get_site_config(site_id)
+        if not existing:
+            return JSONResponse({"error": "Site not found"}, status_code=404)
+        updated = SiteConfig(site_id=site_id, **updates.model_dump())
+        set_site_config(updated)
+        logger.info(f"Site updated: {site_id}")
+        return {"config": vars(updated)}
+    except Exception as e:
+        logger.error(f"Error updating site {site_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Failed to update site", "details": str(e)},
+            status_code=400,
+        )
 
 
 @app.delete("/api/sites/{site_id}")
 async def delete_site(site_id: str):
     """Delete a site configuration."""
-    existing = get_site_config(site_id)
-    if not existing:
-        return JSONResponse({"error": "Site not found"}, status_code=404)
-    delete_site_config(site_id)
-    return {"deleted": True, "site_id": site_id}
+    try:
+        # Validate site_id
+        if not validate_site_id(site_id):
+            return JSONResponse(
+                {"error": "Invalid site_id format"},
+                status_code=400,
+            )
+        existing = get_site_config(site_id)
+        if not existing:
+            return JSONResponse({"error": "Site not found"}, status_code=404)
+        delete_site_config(site_id)
+        logger.info(f"Site deleted: {site_id}")
+        return {"deleted": True, "site_id": site_id}
+    except Exception as e:
+        logger.error(f"Error deleting site {site_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Failed to delete site"},
+            status_code=500,
+        )
 
 
 # ========================================
@@ -198,40 +420,115 @@ class KnowledgeDoc(BaseModel):
     title: str = ""
     content: str
 
+    @field_validator("title", "content")
+    @classmethod
+    def validate_content(cls, v):
+        if not isinstance(v, str):
+            raise ValueError("must be string")
+        if len(v) > 50000:
+            raise ValueError("content too long (max 50000 chars)")
+        return sanitize_string(v, 50000)
+
 
 @app.get("/api/sites/{site_id}/knowledge")
-async def list_knowledge(site_id: str):
+async def list_knowledge(site_id: str, limit: int = 50):
     """List knowledge base documents for a site."""
-    config = get_site_config(site_id)
-    if not config:
-        return JSONResponse({"error": "Site not found"}, status_code=404)
-    docs = firestore_get_knowledge(site_id)
-    return {"documents": docs}
+    try:
+        # Validate site_id and limit
+        if not validate_site_id(site_id):
+            return JSONResponse(
+                {"error": "Invalid site_id format"},
+                status_code=400,
+            )
+        limit = max(1, min(limit, 100))  # Clamp to 1-100
+        config = get_site_config(site_id)
+        if not config:
+            return JSONResponse({"error": "Site not found"}, status_code=404)
+        docs = firestore_get_knowledge(site_id)
+        return {"documents": docs[:limit]}
+    except Exception as e:
+        logger.error(f"Error listing knowledge for {site_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Failed to list knowledge documents"},
+            status_code=500,
+        )
 
 
 @app.post("/api/sites/{site_id}/knowledge")
 async def create_knowledge(site_id: str, doc: KnowledgeDoc):
     """Add a knowledge base document."""
-    config = get_site_config(site_id)
-    if not config:
-        return JSONResponse({"error": "Site not found"}, status_code=404)
-    doc_id = str(uuid.uuid4())[:8]
-    firestore_set_knowledge(site_id, doc_id, doc.content, doc.title)
-    return {"id": doc_id, "title": doc.title}
+    try:
+        # Validate site_id
+        if not validate_site_id(site_id):
+            return JSONResponse(
+                {"error": "Invalid site_id format"},
+                status_code=400,
+            )
+        config = get_site_config(site_id)
+        if not config:
+            return JSONResponse({"error": "Site not found"}, status_code=404)
+        doc_id = str(uuid.uuid4())[:8]
+        firestore_set_knowledge(site_id, doc_id, doc.content, doc.title)
+        logger.info(f"Knowledge doc created: {site_id}/{doc_id}")
+        return {"id": doc_id, "title": doc.title}
+    except Exception as e:
+        logger.error(f"Error creating knowledge doc for {site_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Failed to create knowledge document", "details": str(e)},
+            status_code=400,
+        )
 
 
 @app.put("/api/sites/{site_id}/knowledge/{doc_id}")
 async def update_knowledge(site_id: str, doc_id: str, doc: KnowledgeDoc):
     """Update a knowledge base document."""
-    firestore_set_knowledge(site_id, doc_id, doc.content, doc.title)
-    return {"id": doc_id, "title": doc.title}
+    try:
+        # Validate site_id and doc_id
+        if not validate_site_id(site_id):
+            return JSONResponse(
+                {"error": "Invalid site_id format"},
+                status_code=400,
+            )
+        if not validate_site_id(doc_id):
+            return JSONResponse(
+                {"error": "Invalid doc_id format"},
+                status_code=400,
+            )
+        firestore_set_knowledge(site_id, doc_id, doc.content, doc.title)
+        logger.info(f"Knowledge doc updated: {site_id}/{doc_id}")
+        return {"id": doc_id, "title": doc.title}
+    except Exception as e:
+        logger.error(f"Error updating knowledge doc {site_id}/{doc_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Failed to update knowledge document", "details": str(e)},
+            status_code=400,
+        )
 
 
 @app.delete("/api/sites/{site_id}/knowledge/{doc_id}")
 async def delete_knowledge(site_id: str, doc_id: str):
     """Delete a knowledge base document."""
-    firestore_delete_knowledge(site_id, doc_id)
-    return {"deleted": True}
+    try:
+        # Validate site_id and doc_id
+        if not validate_site_id(site_id):
+            return JSONResponse(
+                {"error": "Invalid site_id format"},
+                status_code=400,
+            )
+        if not validate_site_id(doc_id):
+            return JSONResponse(
+                {"error": "Invalid doc_id format"},
+                status_code=400,
+            )
+        firestore_delete_knowledge(site_id, doc_id)
+        logger.info(f"Knowledge doc deleted: {site_id}/{doc_id}")
+        return {"deleted": True}
+    except Exception as e:
+        logger.error(f"Error deleting knowledge doc {site_id}/{doc_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Failed to delete knowledge document"},
+            status_code=500,
+        )
 
 
 # ========================================
@@ -242,20 +539,52 @@ async def delete_knowledge(site_id: str, doc_id: str):
 @app.get("/api/sites/{site_id}/sessions")
 async def list_site_sessions(site_id: str, limit: int = 50):
     """List recent sessions for a site."""
-    config = get_site_config(site_id)
-    if not config:
-        return JSONResponse({"error": "Site not found"}, status_code=404)
-    sessions = list_sessions(site_id, limit=limit)
-    return {"sessions": sessions}
+    try:
+        # Validate site_id and limit
+        if not validate_site_id(site_id):
+            return JSONResponse(
+                {"error": "Invalid site_id format"},
+                status_code=400,
+            )
+        limit = max(1, min(limit, 100))  # Clamp to 1-100
+        config = get_site_config(site_id)
+        if not config:
+            return JSONResponse({"error": "Site not found"}, status_code=404)
+        sessions = list_sessions(site_id, limit=limit)
+        return {"sessions": sessions}
+    except Exception as e:
+        logger.error(f"Error listing sessions for {site_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Failed to list sessions"},
+            status_code=500,
+        )
 
 
 @app.get("/api/sites/{site_id}/sessions/{session_id}")
 async def get_session(site_id: str, session_id: str):
     """Get a session's conversation history."""
-    history = get_session_history(site_id, session_id)
-    if not history:
-        return JSONResponse({"error": "Session not found"}, status_code=404)
-    return {"session": history}
+    try:
+        # Validate site_id and session_id
+        if not validate_site_id(site_id):
+            return JSONResponse(
+                {"error": "Invalid site_id format"},
+                status_code=400,
+            )
+        if not validate_site_id(session_id):
+            return JSONResponse(
+                {"error": "Invalid session_id format"},
+                status_code=400,
+            )
+        history = get_session_history(site_id, session_id)
+        if not history:
+            return JSONResponse({"error": "Session not found"}, status_code=404)
+        return {"session": history}
+    except Exception as e:
+        logger.error(f"Error getting session {site_id}/{session_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Failed to get session"},
+            status_code=500,
+        )
 
 
 # ========================================
@@ -266,11 +595,24 @@ async def get_session(site_id: str, session_id: str):
 @app.get("/api/sites/{site_id}/stats")
 async def site_stats(site_id: str):
     """Get analytics counters for a site."""
-    config = get_site_config(site_id)
-    if not config:
-        return JSONResponse({"error": "Site not found"}, status_code=404)
-    stats = get_site_stats(site_id)
-    return {"stats": stats}
+    try:
+        # Validate site_id
+        if not validate_site_id(site_id):
+            return JSONResponse(
+                {"error": "Invalid site_id format"},
+                status_code=400,
+            )
+        config = get_site_config(site_id)
+        if not config:
+            return JSONResponse({"error": "Site not found"}, status_code=404)
+        stats = get_site_stats(site_id)
+        return {"stats": stats}
+    except Exception as e:
+        logger.error(f"Error getting stats for {site_id}: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Failed to get site statistics"},
+            status_code=500,
+        )
 
 
 # ========================================
