@@ -238,6 +238,61 @@ const OVERLAY_STYLES = `
     box-shadow: 0 6px 24px rgba(0,0,0,0.25);
   }
 
+  /* Welcome bubble (HTML popup near the FAB) */
+  .webclaw-welcome-bubble {
+    position: absolute;
+    bottom: 72px;
+    right: 0;
+    background: white;
+    color: #333;
+    padding: 12px 16px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.08);
+    font-size: 14px;
+    line-height: 1.4;
+    max-width: 260px;
+    min-width: 160px;
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .webclaw-welcome-bubble.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  .webclaw-welcome-bubble::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    right: 24px;
+    width: 12px;
+    height: 12px;
+    background: white;
+    transform: rotate(45deg);
+    box-shadow: 2px 2px 4px rgba(0,0,0,0.06);
+  }
+
+  .webclaw-welcome-bubble .bubble-name {
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--wc-color, #FF4D4D);
+    margin-bottom: 4px;
+  }
+
+  .webclaw-container.bottom-left .webclaw-welcome-bubble {
+    right: auto;
+    left: 0;
+  }
+
+  .webclaw-container.bottom-left .webclaw-welcome-bubble::after {
+    right: auto;
+    left: 24px;
+  }
+
   /* Animations */
   @keyframes webclaw-slide-up {
     from { opacity: 0; transform: translateY(16px); }
@@ -273,6 +328,8 @@ class WebClawEmbed {
   private connectionState: 'connected' | 'connecting' | 'disconnected' = 'disconnected';
   private currentAgent: 'site' | 'personal' = 'site';
   private voiceBarEl: HTMLElement | null = null;
+  private welcomeMessage: string = '';
+  private personaName: string = 'WebClaw';
 
   constructor(config: WebClawConfig) {
     this.config = config;
@@ -282,6 +339,64 @@ class WebClawEmbed {
     this.createUI();
     this.bindGatewayEvents();
     this.bindAudioEvents();
+
+    // Fetch welcome config and show bubble, then auto-connect to gateway
+    this.initWelcomeAndConnect();
+  }
+
+  /**
+   * Fetch welcome config from gateway REST API, show speech bubble on avatar,
+   * and auto-connect the WebSocket so the agent is ready immediately.
+   */
+  private async initWelcomeAndConnect(): Promise<void> {
+    // 1. Fetch welcome config from REST API
+    try {
+      const res = await fetch(
+        `${this.config.gatewayUrl}/api/sites/${this.config.siteId}/welcome`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        this.welcomeMessage = data.welcome_message || 'Hi! I\'m here to help.';
+        this.personaName = data.persona_name || 'WebClaw';
+      }
+    } catch (e) {
+      console.warn('[WebClaw] Could not fetch welcome config, using defaults');
+      this.welcomeMessage = 'Hi! I\'m here to help.';
+    }
+
+    // 2. Update the panel header with the persona name
+    const headerTitle = this.shadow.querySelector('.webclaw-panel-header h3');
+    if (headerTitle) headerTitle.textContent = this.personaName;
+
+    // 3. Show welcome message as HTML popup bubble near the chathead
+    if (this.welcomeMessage) {
+      const bubble = this.shadow.querySelector('#wc-welcome-bubble');
+      const bubbleName = this.shadow.querySelector('#wc-welcome-bubble .bubble-name');
+      const bubbleText = this.shadow.querySelector('#wc-welcome-bubble .bubble-text');
+      if (bubble && bubbleName && bubbleText) {
+        bubbleName.textContent = this.personaName;
+        bubbleText.textContent = this.welcomeMessage;
+        // Short delay so the user sees the avatar appear first, then the bubble pops
+        setTimeout(() => {
+          bubble.classList.add('visible');
+          // Auto-hide the bubble after 8 seconds
+          setTimeout(() => {
+            bubble.classList.remove('visible');
+          }, 8000);
+        }, 1500);
+      }
+    }
+
+    // 4. Auto-connect to gateway WebSocket (don't wait for panel open)
+    this.setConnectionState('connecting');
+    this.setStatus('Connecting...');
+    try {
+      await this.gateway.connect();
+    } catch (e: any) {
+      this.setConnectionState('disconnected');
+      this.setStatus('Tap to connect');
+      console.error('[WebClaw] Auto-connect failed:', e);
+    }
   }
 
   private createUI(): void {
@@ -338,6 +453,10 @@ class WebClawEmbed {
             </svg>
           </button>
         </div>
+      </div>
+      <div class="webclaw-welcome-bubble" id="wc-welcome-bubble">
+        <div class="bubble-name"></div>
+        <div class="bubble-text"></div>
       </div>
       <button class="webclaw-fab" aria-label="Open WebClaw chat" title="Chat with WebClaw">
         <canvas id="wc-fab-avatar" width="128" height="128" style="width:64px;height:64px;border-radius:50%;"></canvas>
@@ -496,6 +615,21 @@ class WebClawEmbed {
         this.audio.isCapturing ? 'listening' : 'idle'
       ), 1000);
     });
+
+    // Handle transcription (agent's spoken words transcribed to text)
+    this.gateway.on('transcription', (msg) => {
+      // Show transcribed agent speech in chat panel too
+      if (msg.text) {
+        this.addMessage('agent', msg.text as string);
+      }
+    });
+
+    // Handle gateway/ADK errors
+    this.gateway.on('error', (msg) => {
+      this.removeTypingIndicator();
+      this.addMessage('agent', `Connection issue: ${msg.error || 'Unknown error'}`);
+      this.avatar?.setState('idle');
+    });
   }
 
   private async startSeamlessVoice(): Promise<void> {
@@ -541,6 +675,7 @@ class WebClawEmbed {
     this.isOpen = !this.isOpen;
     this.panel.classList.toggle('open', this.isOpen);
 
+    // If panel opened and we're disconnected, try to reconnect
     if (this.isOpen && this.connectionState === 'disconnected') {
       this.setConnectionState('connecting');
       this.setStatus('Connecting...');
@@ -550,6 +685,13 @@ class WebClawEmbed {
         this.setConnectionState('disconnected');
         this.setStatus('Connection failed');
         console.error('[WebClaw] Connection error:', e);
+      }
+    }
+
+    // If panel opened and connected, add welcome message to chat if empty
+    if (this.isOpen && this.connectionState === 'connected' && this.messagesEl.children.length === 0) {
+      if (this.welcomeMessage) {
+        this.addMessage('agent', this.welcomeMessage);
       }
     }
   }

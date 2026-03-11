@@ -69,38 +69,74 @@ export class GatewayClient {
   }
 
   private handleMessage(msg: any): void {
-    // ADK events come in various shapes; normalize them
-    // Check for tool calls (DOM actions)
-    if (msg.content?.parts) {
-      for (const part of msg.content.parts) {
-        if (part.function_call) {
-          this.emit('action', {
-            type: 'action',
-            action: part.function_call.name,
-            args: part.function_call.args,
-            id: part.function_call.id,
-          });
-        }
-        if (part.text) {
-          this.emit('text', { type: 'text', text: part.text });
-        }
-        if (part.inline_data) {
-          this.emit('audio', {
-            type: 'audio',
-            data: part.inline_data.data,
-            mimeType: part.inline_data.mime_type,
-          });
-        }
-      }
-    }
+    // ADK events come in various shapes; normalize them for the embed.
+    //
+    // Gemini Live API / ADK returns events with different structures:
+    //   - content.parts[].text          → agent text response
+    //   - content.parts[].inline_data   → audio chunk (base64 PCM)
+    //   - content.parts[].function_call → tool call (DOM action)
+    //   - serverContent.modelTurn.parts → alternative Gemini Live wrapping
+    //   - type: "error"                 → gateway/ADK error
+    //   - type: "negotiate_ack"         → negotiation acknowledgment
+    //   - outputTranscription           → agent's spoken words transcribed as text
 
-    // Also emit raw event for custom handling
-    this.emit('raw', msg);
+    // Handle gateway-level error events
+    if (msg.type === 'error') {
+      console.error('[WebClaw] Gateway error:', msg.error, msg.details);
+      this.emit('error', msg);
+      return;
+    }
 
     // Negotiation acknowledgment
     if (msg.type === 'negotiate_ack') {
       this.emit('negotiate_ack', msg);
+      return;
     }
+
+    // Extract parts from various ADK event structures
+    let parts: any[] = [];
+
+    if (msg.content?.parts) {
+      parts = msg.content.parts;
+    } else if (msg.serverContent?.modelTurn?.parts) {
+      // Gemini Live native format
+      parts = msg.serverContent.modelTurn.parts;
+    }
+
+    // Process all parts
+    for (const part of parts) {
+      // Text response
+      if (part.text) {
+        this.emit('text', { type: 'text', text: part.text });
+      }
+      // Audio response (handles both snake_case and camelCase)
+      if (part.inline_data || part.inlineData) {
+        const inlineData = part.inline_data || part.inlineData;
+        this.emit('audio', {
+          type: 'audio',
+          data: inlineData.data,
+          mimeType: inlineData.mime_type || inlineData.mimeType,
+        });
+      }
+      // Tool call / function call → DOM actions
+      if (part.function_call || part.functionCall) {
+        const fc = part.function_call || part.functionCall;
+        this.emit('action', {
+          type: 'action',
+          action: fc.name,
+          args: fc.args,
+          id: fc.id,
+        });
+      }
+    }
+
+    // Handle output transcription (agent's spoken words as text)
+    if (msg.outputTranscription) {
+      this.emit('transcription', { type: 'transcription', text: msg.outputTranscription });
+    }
+
+    // Also emit raw event for custom handling
+    this.emit('raw', msg);
   }
 
   on(event: string, handler: MessageHandler): void {
