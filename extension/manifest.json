@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "WebClaw - Personal Live Agent",
-  "version": "0.1.0",
-  "description": "Your personal AI agent that works on any website. Voice-first, action-capable.",
+  "version": "0.2.0",
+  "description": "Your personal AI agent that works on any website. Voice-first, seamless, action-capable.",
   "permissions": [
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "tabs"
   ],
   "host_permissions": ["<all_urls>"],
   "action": {
@@ -32,5 +33,21 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
+  },
+  "commands": {
+    "toggle-webclaw": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+W",
+        "mac": "Command+Shift+W"
+      },
+      "description": "Toggle WebClaw on this page"
+    },
+    "switch-agent": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+A",
+        "mac": "Command+Shift+A"
+      },
+      "description": "Switch between site agent and personal agent"
+    }
   }
 }
