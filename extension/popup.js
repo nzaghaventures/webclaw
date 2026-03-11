@@ -277,6 +277,9 @@ document.getElementById('btn-save-avatar')?.addEventListener('click', async () =
 
 function bindEvents() {
   document.getElementById('btn-save-settings')?.addEventListener('click', saveSettings);
+  document.getElementById('btn-open-settings')?.addEventListener('click', () => {
+    chrome.runtime.openOptionsPage?.();
+  });
 }
 
 async function saveSettings() {
