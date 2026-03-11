@@ -37,7 +37,7 @@ function getConfig(): WebClawConfig {
 
   return {
     siteId: script?.getAttribute('data-site-id') || 'demo',
-    gatewayUrl: script?.getAttribute('data-gateway') || 'http://localhost:8080',
+    gatewayUrl: script?.getAttribute('data-gateway') || 'http://localhost:8081',
     position: (script?.getAttribute('data-position') as any) || 'bottom-right',
     theme: (script?.getAttribute('data-theme') as any) || 'light',
     avatarColor: script?.getAttribute('data-color') || '#FF4D4D',
