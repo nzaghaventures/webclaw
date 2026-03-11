@@ -370,7 +370,15 @@
       notifyStatus();
     };
 
+    ws.binaryType = 'arraybuffer';
+
     ws.onmessage = (event) => {
+      // Binary frames = raw PCM audio from Gemini
+      if (event.data instanceof ArrayBuffer) {
+        playAudioChunk(event.data);
+        return;
+      }
+      // Text frames = JSON events
       try {
         const msg = JSON.parse(event.data);
         handleGatewayEvent(msg);
@@ -388,55 +396,60 @@
   }
 
   function handleGatewayEvent(event) {
-    // Error events
-    if (event.type === 'error') {
+    // New google-genai SDK events are simple typed JSON:
+    //   {"type": "gemini", "text": "..."}        - agent text / transcription
+    //   {"type": "user", "text": "..."}           - user input transcription
+    //   {"type": "tool_call", "name": "...", "args": {...}, "result": {...}}
+    //   {"type": "turn_complete"}
+    //   {"type": "interrupted"}
+    //   {"type": "error", "error": "..."}
+    //   {"type": "negotiate_ack", ...}
+    // Audio comes as binary ArrayBuffer (handled in onmessage above).
+
+    const eventType = event.type;
+
+    if (eventType === 'error') {
       addMessage('error', `Connection issue: ${event.error || 'Unknown error'}`);
       setAvatarState('idle');
       return;
     }
 
-    // Negotiation acknowledgment
-    if (event.type === 'negotiate_ack') {
+    if (eventType === 'negotiate_ack') {
       const persona = event.persona?.name || 'WebClaw';
       addMessage('system', `Connected to ${persona}`);
       return;
     }
 
-    // Extract parts from various ADK event structures
-    let parts = [];
-    if (event.content?.parts) {
-      parts = event.content.parts;
-    } else if (event.serverContent?.modelTurn?.parts) {
-      // Gemini Live native format
-      parts = event.serverContent.modelTurn.parts;
+    if (eventType === 'gemini') {
+      // Agent text / output transcription
+      addMessage('agent', event.text);
+      setAvatarState('speaking');
+      setTimeout(() => setAvatarState(seamlessVoice ? 'listening' : 'idle'), 2000);
+      chrome.runtime?.sendMessage({ type: 'AGENT_MESSAGE', text: event.text }).catch(() => {});
+      checkVoiceSwitchCommand(event.text);
+      return;
     }
 
-    for (const part of parts) {
-      if (part.text) {
-        addMessage('agent', part.text);
-        setAvatarState('speaking');
-        setTimeout(() => setAvatarState(seamlessVoice ? 'listening' : 'idle'), 2000);
-
-        // Relay to popup
-        chrome.runtime?.sendMessage({ type: 'AGENT_MESSAGE', text: part.text }).catch(() => {});
-
-        // Check for agent switch voice commands
-        checkVoiceSwitchCommand(part.text);
-      }
-      // Tool calls (handles both snake_case and camelCase)
-      if (part.function_call || part.functionCall) {
-        executeAction(part.function_call || part.functionCall);
-      }
-      // Audio (handles both snake_case and camelCase)
-      if (part.inline_data || part.inlineData) {
-        const inlineData = part.inline_data || part.inlineData;
-        playAudioChunk(inlineData.data);
-      }
+    if (eventType === 'user') {
+      // Input transcription — could display in chat as user message
+      addMessage('user', event.text);
+      return;
     }
 
-    // Handle output transcription (agent's spoken words as text)
-    if (event.outputTranscription) {
-      addMessage('agent', event.outputTranscription);
+    if (eventType === 'tool_call') {
+      // DOM action from Gemini — execute it
+      executeAction({ name: event.name, args: event.args });
+      return;
+    }
+
+    if (eventType === 'turn_complete') {
+      setAvatarState(seamlessVoice ? 'listening' : 'idle');
+      return;
+    }
+
+    if (eventType === 'interrupted') {
+      setAvatarState('listening');
+      return;
     }
   }
 
@@ -662,15 +675,25 @@
   // Audio Playback
   // =============================================
 
-  function playAudioChunk(base64Data) {
+  function playAudioChunk(audioData) {
+    // audioData can be an ArrayBuffer (binary WS frame) or a base64 string (legacy)
     if (!playbackContext) {
       playbackContext = new AudioContext({ sampleRate: 24000 });
     }
 
-    const binary = atob(base64Data);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const int16 = new Int16Array(bytes.buffer);
+    let int16;
+    if (audioData instanceof ArrayBuffer) {
+      int16 = new Int16Array(audioData);
+    } else if (typeof audioData === 'string') {
+      // base64 fallback
+      const binary = atob(audioData);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      int16 = new Int16Array(bytes.buffer);
+    } else {
+      return;
+    }
+
     const float32 = new Float32Array(int16.length);
     for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 0x7FFF;
 
