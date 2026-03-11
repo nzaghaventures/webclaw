@@ -22,14 +22,35 @@ export async function executeAction(req: ActionRequest): Promise<ActionResult> {
   const id = req.id || 'unknown';
   try {
     switch (req.action) {
-      case 'click': return await doClick(id, req.selector as string);
-      case 'type': return await doType(id, req.selector as string, req.text as string, req.clear_first as boolean);
-      case 'scroll': return await doScroll(id, req.selector as string, req.direction as string, req.amount as number);
-      case 'navigate': return doNavigate(id, req.url as string);
-      case 'highlight': return await doHighlight(id, req.selector as string, req.message as string);
-      case 'read': return await doRead(id, req.selector as string);
-      case 'select': return await doSelect(id, req.selector as string, req.value as string);
-      case 'check': return await doCheck(id, req.selector as string, req.checked as boolean);
+      // Match both short names ("click") and Gemini function names ("click_element")
+      case 'click':
+      case 'click_element':
+        return await doClick(id, req.selector as string);
+      case 'type':
+      case 'type_text':
+        return await doType(id, req.selector as string, req.text as string, req.clear_first as boolean);
+      case 'scroll':
+      case 'scroll_to':
+        return await doScroll(id, req.selector as string, req.direction as string, req.amount as number);
+      case 'scroll_to_top':
+        return doScrollToTop(id);
+      case 'scroll_to_bottom':
+        return doScrollToBottom(id);
+      case 'navigate':
+      case 'navigate_to':
+        return doNavigate(id, req.url as string);
+      case 'highlight':
+      case 'highlight_element':
+        return await doHighlight(id, req.selector as string, req.message as string);
+      case 'read':
+      case 'read_page':
+        return await doRead(id, req.selector as string);
+      case 'select':
+      case 'select_option':
+        return await doSelect(id, req.selector as string, req.value as string);
+      case 'check':
+      case 'check_checkbox':
+        return await doCheck(id, req.selector as string, req.checked as boolean);
       default:
         return { action_id: id, status: 'error', message: `Unknown action: ${req.action}` };
     }
@@ -124,6 +145,16 @@ async function doSelect(id: string, selector: string, value: string): Promise<Ac
   el.value = option.value;
   el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
   return { action_id: id, status: 'success', message: `Selected: ${value}` };
+}
+
+function doScrollToTop(id: string): ActionResult {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  return { action_id: id, status: 'success', message: 'Scrolled to top of page' };
+}
+
+function doScrollToBottom(id: string): ActionResult {
+  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+  return { action_id: id, status: 'success', message: 'Scrolled to bottom of page' };
 }
 
 async function doCheck(id: string, selector: string, checked: boolean): Promise<ActionResult> {
