@@ -116,6 +116,30 @@ def scroll_to(selector: str = "", direction: str = "down", amount: int = 300) ->
         raise
 
 
+def scroll_to_top() -> dict[str, Any]:
+    """Scroll the page to the very top.
+
+    Returns:
+        dict: Action result with status and details.
+    """
+    return {
+        "action": "scroll_to_top",
+        "status": "pending",
+    }
+
+
+def scroll_to_bottom() -> dict[str, Any]:
+    """Scroll the page to the very bottom.
+
+    Returns:
+        dict: Action result with status and details.
+    """
+    return {
+        "action": "scroll_to_bottom",
+        "status": "pending",
+    }
+
+
 def navigate_to(url: str) -> dict[str, Any]:
     """Navigate to a URL within the current website.
 
@@ -238,6 +262,8 @@ DOM_TOOLS = [
     click_element,
     type_text,
     scroll_to,
+    scroll_to_top,
+    scroll_to_bottom,
     navigate_to,
     highlight_element,
     read_page,
