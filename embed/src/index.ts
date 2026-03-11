@@ -571,7 +571,7 @@ class WebClawEmbed {
     this.gateway.on('audio', (msg) => {
       this.removeTypingIndicator();
       this.avatar?.setState('speaking');
-      this.audio.playAudio(msg.data as string);
+      this.audio.playAudio(msg.data as ArrayBuffer | string);
 
       // Connect playback analyser to avatar for lip-sync
       const analyser = this.audio.getPlaybackAnalyser();

@@ -40,7 +40,19 @@ export class GatewayClient {
         resolve();
       };
 
+      this.ws.binaryType = 'arraybuffer';
+
       this.ws.onmessage = (event) => {
+        // Binary frames = raw PCM audio from Gemini
+        if (event.data instanceof ArrayBuffer) {
+          this.emit('audio', {
+            type: 'audio',
+            data: event.data,
+            mimeType: 'audio/pcm;rate=24000',
+          } as any);
+          return;
+        }
+        // Text frames = JSON events
         try {
           const msg = JSON.parse(event.data);
           this.handleMessage(msg);
@@ -69,70 +81,62 @@ export class GatewayClient {
   }
 
   private handleMessage(msg: any): void {
-    // ADK events come in various shapes; normalize them for the embed.
-    //
-    // Gemini Live API / ADK returns events with different structures:
-    //   - content.parts[].text          → agent text response
-    //   - content.parts[].inline_data   → audio chunk (base64 PCM)
-    //   - content.parts[].function_call → tool call (DOM action)
-    //   - serverContent.modelTurn.parts → alternative Gemini Live wrapping
-    //   - type: "error"                 → gateway/ADK error
-    //   - type: "negotiate_ack"         → negotiation acknowledgment
-    //   - outputTranscription           → agent's spoken words transcribed as text
+    // New google-genai SDK events are simple typed JSON objects:
+    //   {"type": "user", "text": "..."}         - input transcription
+    //   {"type": "gemini", "text": "..."}        - output transcription / text
+    //   {"type": "tool_call", "name": "...", "args": {...}, "result": {...}}
+    //   {"type": "turn_complete"}
+    //   {"type": "interrupted"}
+    //   {"type": "error", "error": "..."}
+    //   {"type": "negotiate_ack", ...}
+    // Audio comes as binary frames (handled in onmessage above).
 
-    // Handle gateway-level error events
-    if (msg.type === 'error') {
+    const eventType = msg.type;
+
+    if (eventType === 'error') {
       console.error('[WebClaw] Gateway error:', msg.error, msg.details);
       this.emit('error', msg);
       return;
     }
 
-    // Negotiation acknowledgment
-    if (msg.type === 'negotiate_ack') {
+    if (eventType === 'negotiate_ack') {
       this.emit('negotiate_ack', msg);
       return;
     }
 
-    // Extract parts from various ADK event structures
-    let parts: any[] = [];
-
-    if (msg.content?.parts) {
-      parts = msg.content.parts;
-    } else if (msg.serverContent?.modelTurn?.parts) {
-      // Gemini Live native format
-      parts = msg.serverContent.modelTurn.parts;
+    if (eventType === 'gemini') {
+      // Agent text / output transcription
+      this.emit('text', { type: 'text', text: msg.text });
+      this.emit('transcription', { type: 'transcription', text: msg.text });
+      return;
     }
 
-    // Process all parts
-    for (const part of parts) {
-      // Text response
-      if (part.text) {
-        this.emit('text', { type: 'text', text: part.text });
-      }
-      // Audio response (handles both snake_case and camelCase)
-      if (part.inline_data || part.inlineData) {
-        const inlineData = part.inline_data || part.inlineData;
-        this.emit('audio', {
-          type: 'audio',
-          data: inlineData.data,
-          mimeType: inlineData.mime_type || inlineData.mimeType,
-        });
-      }
-      // Tool call / function call → DOM actions
-      if (part.function_call || part.functionCall) {
-        const fc = part.function_call || part.functionCall;
-        this.emit('action', {
-          type: 'action',
-          action: fc.name,
-          args: fc.args,
-          id: fc.id,
-        });
-      }
+    if (eventType === 'user') {
+      // Input transcription
+      this.emit('input_transcription', { type: 'input_transcription', text: msg.text });
+      return;
     }
 
-    // Handle output transcription (agent's spoken words as text)
-    if (msg.outputTranscription) {
-      this.emit('transcription', { type: 'transcription', text: msg.outputTranscription });
+    if (eventType === 'tool_call') {
+      // DOM action from Gemini
+      this.emit('action', {
+        type: 'action',
+        action: msg.name,
+        args: msg.args,
+        id: msg.name,  // use name as id fallback
+        result: msg.result,
+      });
+      return;
+    }
+
+    if (eventType === 'turn_complete') {
+      this.emit('turn_complete', { type: 'turn_complete' });
+      return;
+    }
+
+    if (eventType === 'interrupted') {
+      this.emit('interrupted', { type: 'interrupted' });
+      return;
     }
 
     // Also emit raw event for custom handling

@@ -223,9 +223,9 @@ export class AudioHandler {
 
   /**
    * Queue audio data for playback.
-   * Expects base64-encoded PCM16 at playback sample rate (Gemini output format).
+   * Accepts ArrayBuffer (raw PCM16 binary) or base64-encoded string (legacy).
    */
-  playAudio(base64Data: string): void {
+  playAudio(audioData: ArrayBuffer | string): void {
     if (!this.playbackContext) {
       this.playbackContext = new AudioContext({ sampleRate: this.opts.playbackSampleRate });
 
@@ -235,13 +235,19 @@ export class AudioHandler {
       this.playbackAnalyser.connect(this.playbackContext.destination);
     }
 
-    const binaryStr = atob(base64Data);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
+    let int16: Int16Array;
+    if (audioData instanceof ArrayBuffer) {
+      int16 = new Int16Array(audioData);
+    } else {
+      // base64 fallback
+      const binaryStr = atob(audioData);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      int16 = new Int16Array(bytes.buffer);
     }
 
-    const int16 = new Int16Array(bytes.buffer);
     const float32 = new Float32Array(int16.length);
     for (let i = 0; i < int16.length; i++) {
       float32[i] = int16[i] / 0x7FFF;
