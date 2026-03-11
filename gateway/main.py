@@ -26,7 +26,7 @@ from google.genai import types
 from pydantic import BaseModel, field_validator
 
 # Load environment variables
-load_dotenv(Path(__file__).parent / ".env")
+load_dotenv(Path(__file__).parent / ".env", override=True)
 
 # Import agent after env is loaded
 from agent.agent import root_agent  # noqa: E402
@@ -57,6 +57,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("webclaw.gateway")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+
+# ── Model sanity check ──────────────────────────────────────
+_active_model = os.environ.get("WEBCLAW_MODEL", "")
+_KNOWN_LIVE_MODELS = {"gemini-2.0-flash-exp", "gemini-2.0-flash-live-001", "gemini-live-2.5-flash-native-audio"}
+if _active_model and _active_model not in _KNOWN_LIVE_MODELS and "live" not in _active_model and "flash-exp" not in _active_model:
+    logger.warning(
+        "WEBCLAW_MODEL=%s may not support bidiGenerateContent (Live API). "
+        "Recommended: gemini-2.0-flash-exp (supports audio+text+tools). "
+        "Set the correct model in gateway/.env",
+        _active_model,
+    )
+logger.info("Active model: %s", root_agent.model)
 
 APP_NAME = "webclaw-gateway"
 
@@ -255,6 +267,25 @@ async def api_health():
             },
             status_code=503,
         )
+
+
+@app.get("/api/sites/{site_id}/welcome")
+async def get_welcome(site_id: str):
+    """Get the welcome configuration for a site (used by embed on page load)."""
+    try:
+        if not validate_site_id(site_id):
+            return JSONResponse({"error": "Invalid site_id format"}, status_code=400)
+        config = get_site_config(site_id)
+        if not config:
+            return {"persona_name": "WebClaw", "welcome_message": "Hi! I'm here to help.", "persona_voice": ""}
+        return {
+            "persona_name": config.persona_name,
+            "welcome_message": config.welcome_message,
+            "persona_voice": config.persona_voice,
+        }
+    except Exception as e:
+        logger.error(f"Error getting welcome for {site_id}: {e}", exc_info=True)
+        return {"persona_name": "WebClaw", "welcome_message": "Hi! I'm here to help.", "persona_voice": ""}
 
 
 @app.get("/embed.js")
@@ -682,7 +713,7 @@ async def websocket_endpoint(
     # bidirectional streaming pipeline to work correctly.
     run_config = RunConfig(
         streaming_mode=StreamingMode.BIDI,
-        response_modalities=["AUDIO"],
+        response_modalities=["AUDIO", "TEXT"],
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
         session_resumption=types.SessionResumptionConfig(),
