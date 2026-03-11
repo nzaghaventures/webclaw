@@ -126,13 +126,13 @@ export class GatewayClient {
     }
 
     if (eventType === 'tool_call') {
-      // DOM action from Gemini
+      // DOM action from Gemini — call_id is used to match the result back
+      console.log('[WebClaw] Tool call:', msg.name, msg.args, 'call_id:', msg.call_id);
       this.emit('action', {
         type: 'action',
         action: msg.name,
         args: msg.args,
-        id: msg.name,  // use name as id fallback
-        result: msg.result,
+        call_id: msg.call_id || msg.name,
       });
       return;
     }
@@ -173,8 +173,8 @@ export class GatewayClient {
     this.send({ type: 'dom_snapshot', html, url });
   }
 
-  sendActionResult(actionId: string, result: unknown): void {
-    this.send({ type: 'dom_result', action_id: actionId, result });
+  sendActionResult(callId: string, result: unknown): void {
+    this.send({ type: 'dom_result', call_id: callId, action_id: callId, result });
   }
 
   sendAudio(audioData: ArrayBuffer): void {

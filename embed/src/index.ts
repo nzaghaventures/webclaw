@@ -591,7 +591,10 @@ class WebClawEmbed {
       this.removeTypingIndicator();
       this.showTypingIndicator();
       this.avatar?.setState('acting');
-      const selector = (msg.args as Record<string, unknown>)?.selector as string || msg.selector as string || '';
+      const args = (msg.args as Record<string, unknown>) || {};
+      const callId = msg.call_id as string || 'unknown';
+      const actionName = msg.action as string;
+      const selector = (args.selector as string) || '';
 
       if (selector) {
         const fab = this.shadow.querySelector('.webclaw-fab');
@@ -606,13 +609,16 @@ class WebClawEmbed {
 
       try {
         const result = await executeAction({
-          action: msg.action as string,
-          id: msg.id as string,
-          ...(msg.args as Record<string, unknown> || {}),
+          action: actionName,
+          id: callId,
+          ...args,
         });
-        this.gateway.sendActionResult(result.action_id, result);
-        this.addMessage('agent', `⚡ ${result.message || result.action_id}`);
+        // Send result back with call_id so gateway can match it to the pending Future
+        this.gateway.sendActionResult(callId, result);
+        this.addMessage('agent', `⚡ ${result.message || actionName}`);
       } catch (e: any) {
+        // Send error back too so the Future resolves
+        this.gateway.sendActionResult(callId, { action_id: callId, status: 'error', message: e.message });
         this.addMessage('agent', `⚡ Action error: ${e.message}`);
       }
       this.removeTypingIndicator();
