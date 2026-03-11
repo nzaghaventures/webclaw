@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -124,7 +125,6 @@ app = FastAPI(
 # ========================================
 
 # Get CORS origins from environment variable, default to "*"
-import os
 cors_origins = os.environ.get("CORS_ORIGINS", "*").split(",")
 cors_origins = [origin.strip() for origin in cors_origins if origin.strip()]
 
@@ -186,6 +186,19 @@ async def error_handler_middleware(request: Request, call_next):
 # Session + Runner
 session_service = InMemorySessionService()
 runner = Runner(app_name=APP_NAME, agent=root_agent, session_service=session_service)
+
+# ── Startup diagnostics ──
+_api_key = os.environ.get("GOOGLE_API_KEY", "")
+_gcp_project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+_emulator = os.environ.get("FIRESTORE_EMULATOR_HOST", "")
+logger.info("=" * 60)
+logger.info(f"WebClaw Gateway v0.2.0")
+logger.info(f"  Model       : {root_agent.model}")
+logger.info(f"  API Key     : {'set (' + _api_key[:8] + '...)' if _api_key else 'NOT SET'}")
+logger.info(f"  GCP Project : {_gcp_project or 'NOT SET (Firestore will try ADC)'}")
+logger.info(f"  Emulator    : {_emulator or 'not configured'}")
+logger.info(f"  Firestore   : {'available' if check_health() else 'unavailable (in-memory only)'}")
+logger.info("=" * 60)
 
 # Serve static assets (logos, favicons)
 static_dir = Path(__file__).parent / "static"
@@ -659,25 +672,21 @@ async def websocket_endpoint(
     record_event(site_id, "sessions_total")
 
     # Determine model capabilities
-    model_name = root_agent.model
-    is_native_audio = "native-audio" in model_name.lower()
+    model_name = root_agent.model or ""
+    model_lower = model_name.lower()
+    is_live_model = any(tag in model_lower for tag in ["live", "native-audio"])
 
-    if is_native_audio:
-        response_modalities = ["AUDIO"]
-        run_config = RunConfig(
-            streaming_mode=StreamingMode.BIDI,
-            response_modalities=response_modalities,
-            input_audio_transcription=types.AudioTranscriptionConfig(),
-            output_audio_transcription=types.AudioTranscriptionConfig(),
-            session_resumption=types.SessionResumptionConfig(),
-        )
-    else:
-        response_modalities = ["AUDIO"]
-        run_config = RunConfig(
-            streaming_mode=StreamingMode.BIDI,
-            response_modalities=response_modalities,
-            session_resumption=types.SessionResumptionConfig(),
-        )
+    logger.info(f"Using model: {model_name} (live={is_live_model})")
+
+    # Both live and non-live models need audio transcription for the
+    # bidirectional streaming pipeline to work correctly.
+    run_config = RunConfig(
+        streaming_mode=StreamingMode.BIDI,
+        response_modalities=["AUDIO"],
+        input_audio_transcription=types.AudioTranscriptionConfig(),
+        output_audio_transcription=types.AudioTranscriptionConfig(),
+        session_resumption=types.SessionResumptionConfig(),
+    )
 
     # Get or create session
     session = await session_service.get_session(
@@ -804,33 +813,46 @@ async def websocket_endpoint(
 
     async def downstream_task() -> None:
         """Receive ADK events, forward to WebSocket."""
-        async for event in runner.run_live(
-            user_id=user_id,
-            session_id=session_id,
-            live_request_queue=live_request_queue,
-            run_config=run_config,
-        ):
-            event_json = event.model_dump_json(exclude_none=True, by_alias=True)
-            await websocket.send_text(event_json)
+        try:
+            async for event in runner.run_live(
+                user_id=user_id,
+                session_id=session_id,
+                live_request_queue=live_request_queue,
+                run_config=run_config,
+            ):
+                event_json = event.model_dump_json(exclude_none=True, by_alias=True)
+                await websocket.send_text(event_json)
 
-            # Track agent text responses for session history
+                # Track agent text responses for session history
+                try:
+                    event_data = json.loads(event_json)
+                    if event_data.get("content", {}).get("parts"):
+                        for part in event_data["content"]["parts"]:
+                            if "text" in part:
+                                session_messages.append({
+                                    "role": "agent", "type": "text",
+                                    "text": part["text"], "ts": time.time(),
+                                })
+                    if event_data.get("outputTranscription"):
+                        session_messages.append({
+                            "role": "agent", "type": "transcription",
+                            "text": event_data["outputTranscription"],
+                            "ts": time.time(),
+                        })
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"Live API streaming error: {e}", exc_info=True)
+            # Send error event to client so the embed/extension knows
+            error_msg = json.dumps({
+                "type": "error",
+                "error": str(e),
+                "details": "The Live API connection failed. Check model name and API key.",
+            })
             try:
-                event_data = json.loads(event_json)
-                if event_data.get("content", {}).get("parts"):
-                    for part in event_data["content"]["parts"]:
-                        if "text" in part:
-                            session_messages.append({
-                                "role": "agent", "type": "text",
-                                "text": part["text"], "ts": time.time(),
-                            })
-                if event_data.get("outputTranscription"):
-                    session_messages.append({
-                        "role": "agent", "type": "transcription",
-                        "text": event_data["outputTranscription"],
-                        "ts": time.time(),
-                    })
+                await websocket.send_text(error_msg)
             except Exception:
-                pass
+                pass  # WebSocket might already be closed
 
     try:
         await asyncio.gather(upstream_task(), downstream_task())
