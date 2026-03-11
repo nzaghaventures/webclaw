@@ -767,8 +767,12 @@ async def websocket_endpoint(
 
     # Async queues for routing client input to the Gemini session
     audio_input_queue: asyncio.Queue[bytes] = asyncio.Queue()
-    text_input_queue: asyncio.Queue[str] = asyncio.Queue()
+    text_input_queue: asyncio.Queue[str] = asyncio.Queue()       # user chat messages → send_client_content
+    context_input_queue: asyncio.Queue[str] = asyncio.Queue()    # DOM snapshots, negotiate, etc → send_realtime_input
     video_input_queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+    # Pending tool calls: maps action_id -> asyncio.Future for browser results
+    pending_tool_futures: dict[str, asyncio.Future] = {}
 
     try:
         async with genai_client.aio.live.connect(
@@ -790,16 +794,14 @@ async def websocket_endpoint(
                 except asyncio.CancelledError:
                     pass
 
-            # ── Send queued text to Gemini ──
+            # ── Send user chat messages to Gemini (triggers a response) ──
             async def send_text():
                 try:
                     while True:
                         text = await text_input_queue.get()
-                        logger.info(f"Sending text to Gemini as client turn: {text[:200]}")
-                        # IMPORTANT: Use send_client_content (not send_realtime_input)
-                        # so Gemini treats this as a conversational turn and responds.
-                        # send_realtime_input(text=...) only appends context without
-                        # triggering a model response.
+                        logger.info(f"Sending user text to Gemini (client turn): {text[:200]}")
+                        # Use send_client_content so Gemini treats this as a
+                        # conversational turn and generates a response.
                         await session.send_client_content(
                             turns=[
                                 types.Content(
@@ -808,6 +810,27 @@ async def websocket_endpoint(
                                 )
                             ],
                             turn_complete=True,
+                        )
+                except asyncio.CancelledError:
+                    pass
+
+            # ── Send context (DOM snapshots, negotiate, etc.) without disrupting audio ──
+            async def send_context():
+                try:
+                    while True:
+                        text = await context_input_queue.get()
+                        logger.info(f"Sending context to Gemini: {text[:200]}")
+                        # Use send_client_content with turn_complete=False so it
+                        # adds to conversation history as context without triggering
+                        # a model response or disrupting the audio stream.
+                        await session.send_client_content(
+                            turns=[
+                                types.Content(
+                                    parts=[types.Part(text=text)],
+                                    role="user",
+                                )
+                            ],
+                            turn_complete=False,
                         )
                 except asyncio.CancelledError:
                     pass
@@ -893,53 +916,65 @@ async def websocket_endpoint(
                                     await event_queue.put({"type": "interrupted"})
 
                             # Tool calls (DOM actions)
+                            # Strategy: forward each tool call to the browser,
+                            # wait for the browser's dom_result, then send
+                            # FunctionResponse back to Gemini with the real result.
+                            # IMPORTANT: This runs in a background task so we don't
+                            # block session.receive() — blocking it kills the audio stream.
                             if tool_call:
-                                function_responses = []
-                                for fc in tool_call.function_calls:
-                                    func_name = fc.name
-                                    args = fc.args or {}
+                                async def _handle_tool_calls(tc):
+                                    function_responses = []
+                                    for fc in tc.function_calls:
+                                        func_name = fc.name
+                                        args = fc.args or {}
+                                        call_id = fc.id or f"{func_name}_{id(fc)}"
 
-                                    if func_name in TOOL_MAPPING:
-                                        try:
-                                            tool_func = TOOL_MAPPING[func_name]
-                                            if inspect.iscoroutinefunction(tool_func):
-                                                result = await tool_func(**args)
-                                            else:
-                                                loop = asyncio.get_running_loop()
-                                                result = await loop.run_in_executor(
-                                                    None, lambda f=tool_func, a=args: f(**a)
+                                        if func_name in TOOL_MAPPING:
+                                            future_obj: asyncio.Future = asyncio.get_running_loop().create_future()
+                                            pending_tool_futures[call_id] = future_obj
+
+                                            logger.info(f"Tool call → browser: {func_name}({args}) id={call_id}")
+                                            await event_queue.put({
+                                                "type": "tool_call",
+                                                "call_id": call_id,
+                                                "name": func_name,
+                                                "args": args,
+                                            })
+
+                                            try:
+                                                browser_result = await asyncio.wait_for(future_obj, timeout=15.0)
+                                                logger.info(f"Tool result from browser: {call_id} → {str(browser_result)[:200]}")
+                                            except asyncio.TimeoutError:
+                                                browser_result = {"status": "error", "message": "Browser action timed out (15s)"}
+                                                logger.warning(f"Tool call timed out: {call_id}")
+                                            finally:
+                                                pending_tool_futures.pop(call_id, None)
+
+                                            function_responses.append(
+                                                types.FunctionResponse(
+                                                    name=func_name,
+                                                    id=fc.id,
+                                                    response={"result": browser_result},
                                                 )
-                                        except Exception as e:
-                                            result = {"error": str(e)}
-
-                                        function_responses.append(
-                                            types.FunctionResponse(
-                                                name=func_name,
-                                                id=fc.id,
-                                                response={"result": result},
                                             )
-                                        )
-                                        # Forward tool call to client for DOM execution
-                                        await event_queue.put({
-                                            "type": "tool_call",
-                                            "name": func_name,
-                                            "args": args,
-                                            "result": result,
-                                        })
-                                        record_event(site_id, "actions_executed")
-                                    else:
-                                        function_responses.append(
-                                            types.FunctionResponse(
-                                                name=func_name,
-                                                id=fc.id,
-                                                response={"error": f"Unknown tool: {func_name}"},
+                                            record_event(site_id, "actions_executed")
+                                        else:
+                                            logger.warning(f"Unknown tool: {func_name}")
+                                            function_responses.append(
+                                                types.FunctionResponse(
+                                                    name=func_name,
+                                                    id=fc.id,
+                                                    response={"error": f"Unknown tool: {func_name}"},
+                                                )
                                             )
-                                        )
 
-                                # Send tool responses back to Gemini
-                                await session.send_tool_response(
-                                    function_responses=function_responses
-                                )
+                                    logger.info(f"Sending {len(function_responses)} tool response(s) to Gemini")
+                                    await session.send_tool_response(
+                                        function_responses=function_responses
+                                    )
+
+                                # Fire-and-forget: don't block the receive loop
+                                asyncio.create_task(_handle_tool_calls(tool_call))
 
                 except Exception as e:
                     await event_queue.put({"type": "error", "error": str(e)})
@@ -979,7 +1014,7 @@ async def websocket_endpoint(
                                     f"[Current Page: {msg.get('url', 'unknown')}]\n"
                                     f"{msg.get('html', '')}"
                                 )
-                                await text_input_queue.put(snapshot_text)
+                                await context_input_queue.put(snapshot_text)
 
                             elif msg_type == "screenshot":
                                 image_data = base64.b64decode(msg["data"])
@@ -991,11 +1026,15 @@ async def websocket_endpoint(
                                 await video_input_queue.put(image_data)
 
                             elif msg_type == "dom_result":
-                                result_text = (
-                                    f"[Action Result] "
-                                    f"{json.dumps(msg.get('result', {}))}"
-                                )
-                                await text_input_queue.put(result_text)
+                                call_id = msg.get("action_id") or msg.get("call_id", "")
+                                result_data = msg.get("result", msg)
+                                logger.info(f"dom_result from browser: call_id={call_id}, result={str(result_data)[:200]}")
+                                # Resolve the pending Future so Gemini gets the real result
+                                future = pending_tool_futures.get(call_id)
+                                if future and not future.done():
+                                    future.set_result(result_data)
+                                else:
+                                    logger.warning(f"No pending future for dom_result call_id={call_id}")
                                 record_event(site_id, "actions_executed")
 
                             elif msg_type == "negotiate":
@@ -1006,7 +1045,7 @@ async def websocket_endpoint(
                                     "Merge the user's personal preferences with site knowledge. "
                                     "Keep user data private from site analytics."
                                 )
-                                await text_input_queue.put(negotiate_text)
+                                await context_input_queue.put(negotiate_text)
                                 # Send negotiation ack back to client
                                 sc = get_site_config(site_id)
                                 ack = json.dumps({
@@ -1043,6 +1082,7 @@ async def websocket_endpoint(
             tasks = [
                 asyncio.create_task(send_audio()),
                 asyncio.create_task(send_text()),
+                asyncio.create_task(send_context()),
                 asyncio.create_task(send_video()),
                 asyncio.create_task(receive_from_gemini()),
                 asyncio.create_task(receive_from_client()),
