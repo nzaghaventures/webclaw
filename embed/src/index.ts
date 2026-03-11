@@ -1,6 +1,7 @@
 /**
  * WebClaw Embed Script
  * Drop-in <script> tag for any website to add a live AI agent.
+ * Now with seamless voice (VAD), character avatar, and agent switching.
  *
  * Usage:
  *   <script src="https://gateway.webclaw.dev/embed.js"
@@ -27,6 +28,7 @@ interface WebClawConfig {
   position?: 'bottom-right' | 'bottom-left';
   theme?: 'light' | 'dark';
   avatarColor?: string;
+  seamless?: boolean;
 }
 
 function getConfig(): WebClawConfig {
@@ -39,6 +41,7 @@ function getConfig(): WebClawConfig {
     position: (script?.getAttribute('data-position') as any) || 'bottom-right',
     theme: (script?.getAttribute('data-theme') as any) || 'light',
     avatarColor: script?.getAttribute('data-color') || '#FF4D4D',
+    seamless: script?.getAttribute('data-seamless') !== 'false', // default true
   };
 }
 
@@ -86,7 +89,7 @@ const OVERLAY_STYLES = `
   .webclaw-panel.open { display: flex; }
 
   .webclaw-panel-header {
-    padding: 16px;
+    padding: 14px 16px;
     background: var(--wc-color, #FF4D4D);
     color: white;
     display: flex;
@@ -108,43 +111,65 @@ const OVERLAY_STYLES = `
 
   .webclaw-panel-header .status {
     font-size: 12px; opacity: 0.8;
+    display: flex; align-items: center; gap: 4px;
   }
 
   .webclaw-status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #4CAF50;
-    animation: none;
+    width: 8px; height: 8px; border-radius: 50%; background: #4CAF50;
   }
 
   .webclaw-status-dot.connecting {
-    background: #FFC107;
-    animation: webclaw-blink 1s infinite;
+    background: #FFC107; animation: webclaw-blink 1s infinite;
   }
 
-  .webclaw-status-dot.disconnected {
-    background: #F44336;
-  }
+  .webclaw-status-dot.disconnected { background: #F44336; }
+  .webclaw-status-dot.listening { background: #00E5CC; animation: webclaw-blink 1s infinite; }
 
   .webclaw-btn-close {
-    background: none;
-    border: none;
-    color: white;
-    font-size: 20px;
-    cursor: pointer;
-    padding: 4px;
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
-    transition: background 0.2s;
+    background: none; border: none; color: white; font-size: 20px; cursor: pointer;
+    padding: 4px; width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px; transition: background 0.2s;
   }
 
-  .webclaw-btn-close:hover {
-    background: rgba(255, 255, 255, 0.2);
+  .webclaw-btn-close:hover { background: rgba(255, 255, 255, 0.2); }
+
+  /* Agent switch pills */
+  .webclaw-agent-switch {
+    display: flex; gap: 4px;
+    background: rgba(255,255,255,0.15); border-radius: 6px; padding: 2px;
+  }
+
+  .webclaw-agent-pill {
+    padding: 4px 10px; border-radius: 4px; border: none;
+    font-size: 11px; font-weight: 500; cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .webclaw-agent-pill.active { background: rgba(255,255,255,0.3); color: white; }
+  .webclaw-agent-pill:not(.active) { background: transparent; color: rgba(255,255,255,0.6); }
+
+  /* Voice indicator */
+  .webclaw-voice-bar {
+    display: none; align-items: center; gap: 8px;
+    padding: 8px 16px; background: rgba(0,229,204,0.08);
+    font-size: 12px; color: #00B8A3;
+  }
+
+  .webclaw-voice-bar.active { display: flex; }
+
+  .webclaw-voice-bars {
+    display: flex; gap: 2px; align-items: flex-end; height: 14px;
+  }
+
+  .webclaw-voice-bar-item {
+    width: 3px; background: #00E5CC; border-radius: 1px;
+    animation: webclaw-bar-pulse 0.6s ease-in-out infinite;
+  }
+
+  @keyframes webclaw-bar-pulse {
+    0%, 100% { transform: scaleY(0.5); }
+    50% { transform: scaleY(1); }
   }
 
   @keyframes webclaw-blink {
@@ -153,120 +178,59 @@ const OVERLAY_STYLES = `
   }
 
   .webclaw-messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px;
-    min-height: 200px;
-    max-height: 320px;
+    flex: 1; overflow-y: auto; padding: 16px;
+    min-height: 200px; max-height: 320px;
   }
 
   .webclaw-msg-wrapper {
-    display: flex;
-    flex-direction: column;
-    margin-bottom: 12px;
-    gap: 4px;
+    display: flex; flex-direction: column; margin-bottom: 12px; gap: 4px;
   }
 
   .webclaw-msg {
-    padding: 10px 14px;
-    border-radius: 12px;
-    font-size: 14px;
-    line-height: 1.4;
-    max-width: 85%;
-    word-wrap: break-word;
+    padding: 10px 14px; border-radius: 12px;
+    font-size: 14px; line-height: 1.4; max-width: 85%; word-wrap: break-word;
   }
 
-  .webclaw-msg.agent {
-    background: #f0f0f0;
-    align-self: flex-start;
-    border-bottom-left-radius: 4px;
-  }
-
-  .webclaw-msg.typing {
-    background: #f0f0f0;
-    align-self: flex-start;
-    border-bottom-left-radius: 4px;
-    font-style: italic;
-    opacity: 0.7;
-  }
-
-  .webclaw-msg.user {
-    background: var(--wc-color, #FF4D4D);
-    color: white;
-    margin-left: auto;
-    border-bottom-right-radius: 4px;
-  }
+  .webclaw-msg.agent { background: #f0f0f0; align-self: flex-start; border-bottom-left-radius: 4px; }
+  .webclaw-msg.typing { background: #f0f0f0; align-self: flex-start; border-bottom-left-radius: 4px; font-style: italic; opacity: 0.7; }
+  .webclaw-msg.user { background: var(--wc-color, #FF4D4D); color: white; margin-left: auto; border-bottom-right-radius: 4px; }
 
   .webclaw-msg-timestamp {
-    font-size: 11px;
-    opacity: 0.6;
-    padding: 0 14px;
-    align-self: flex-start;
+    font-size: 11px; opacity: 0.6; padding: 0 14px; align-self: flex-start;
   }
 
-  .webclaw-msg.user ~ .webclaw-msg-timestamp {
-    align-self: flex-end;
-  }
+  .webclaw-msg.user ~ .webclaw-msg-timestamp { align-self: flex-end; }
 
   .webclaw-input-row {
-    display: flex;
-    border-top: 1px solid #eee;
-    padding: 8px;
-    gap: 8px;
-    align-items: center;
+    display: flex; border-top: 1px solid #eee; padding: 8px; gap: 8px; align-items: center;
   }
 
   .webclaw-input-row input {
-    flex: 1;
-    border: none;
-    outline: none;
-    padding: 10px;
-    font-size: 14px;
-    background: transparent;
+    flex: 1; border: none; outline: none; padding: 10px; font-size: 14px; background: transparent;
   }
 
   .webclaw-input-row input:focus {
-    outline: 1px solid #e0e0e0;
-    outline-offset: -1px;
+    outline: 1px solid #e0e0e0; outline-offset: -1px;
   }
 
-  .webclaw-btn-mic {
-    width: 40px; height: 40px;
-    border-radius: 50%;
-    border: none;
-    background: var(--wc-color, #FF4D4D);
-    color: white;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: transform 0.15s, box-shadow 0.15s;
+  .webclaw-btn-send {
+    width: 40px; height: 40px; border-radius: 50%; border: none;
+    background: var(--wc-color, #FF4D4D); color: white; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.15s;
   }
 
-  .webclaw-btn-mic:hover { transform: scale(1.05); }
-  .webclaw-btn-mic:focus {
-    outline: 2px solid #333;
-    outline-offset: 2px;
-  }
-  .webclaw-btn-mic.active {
-    background: #ea4335;
-    animation: webclaw-pulse-mic 1.5s infinite;
-  }
+  .webclaw-btn-send:hover { transform: scale(1.05); }
 
-  /* FAB */
+  /* FAB (character avatar) */
   .webclaw-fab {
-    width: 56px; height: 56px;
-    border-radius: 50%;
-    background: var(--wc-color, #FF4D4D);
-    color: white;
-    border: none;
-    cursor: pointer;
+    width: 64px; height: 64px; border-radius: 50%;
+    border: none; cursor: pointer;
     box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    display: flex; align-items: center; justify-content: center;
     transition: transform 0.2s, box-shadow 0.2s;
-    font-size: 24px;
+    background: transparent; padding: 0;
+    overflow: hidden;
   }
 
   .webclaw-fab:hover {
@@ -279,19 +243,9 @@ const OVERLAY_STYLES = `
     from { opacity: 0; transform: translateY(16px); }
     to { opacity: 1; transform: translateY(0); }
   }
-
-  @keyframes webclaw-pulse-mic {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(234,67,53,0.4); }
-    50% { box-shadow: 0 0 0 12px rgba(234,67,53,0); }
-  }
-
-  @keyframes webclaw-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
 `;
 
-// Also inject global highlight animation
+// Global highlight animation
 const GLOBAL_STYLE = document.createElement('style');
 GLOBAL_STYLE.textContent = `
   @keyframes webclaw-pulse {
@@ -314,22 +268,23 @@ class WebClawEmbed {
   private messagesEl!: HTMLElement;
   private statusDot!: HTMLElement;
   private avatar: Avatar | null = null;
-  private isMicActive = false;
   private isOpen = false;
   private typingIndicator: HTMLElement | null = null;
   private connectionState: 'connected' | 'connecting' | 'disconnected' = 'disconnected';
+  private currentAgent: 'site' | 'personal' = 'site';
+  private voiceBarEl: HTMLElement | null = null;
 
   constructor(config: WebClawConfig) {
     this.config = config;
     this.gateway = new GatewayClient(config.gatewayUrl, config.siteId);
-    this.audio = new AudioHandler();
+    this.audio = new AudioHandler({ seamless: config.seamless ?? true });
 
     this.createUI();
     this.bindGatewayEvents();
+    this.bindAudioEvents();
   }
 
   private createUI(): void {
-    // Web Component with Shadow DOM to isolate styles
     const host = document.createElement('webclaw-overlay');
     this.shadow = host.attachShadow({ mode: 'closed' });
 
@@ -354,24 +309,38 @@ class WebClawEmbed {
               </div>
             </div>
           </div>
+          <div class="webclaw-agent-switch">
+            <button class="webclaw-agent-pill active" data-agent="site">Site</button>
+            <button class="webclaw-agent-pill" data-agent="personal">My Claw</button>
+          </div>
           <button class="webclaw-btn-close" aria-label="Close WebClaw chat panel" title="Close">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/>
             </svg>
           </button>
         </div>
+        <div class="webclaw-voice-bar">
+          <div class="webclaw-voice-bars">
+            <div class="webclaw-voice-bar-item" style="height:4px;animation-delay:0s;"></div>
+            <div class="webclaw-voice-bar-item" style="height:8px;animation-delay:0.1s;"></div>
+            <div class="webclaw-voice-bar-item" style="height:12px;animation-delay:0.2s;"></div>
+            <div class="webclaw-voice-bar-item" style="height:8px;animation-delay:0.3s;"></div>
+            <div class="webclaw-voice-bar-item" style="height:4px;animation-delay:0.4s;"></div>
+          </div>
+          <span>Listening... just speak naturally</span>
+        </div>
         <div class="webclaw-messages"></div>
         <div class="webclaw-input-row">
           <input type="text" placeholder="Type a message..." aria-label="Chat message input" />
-          <button class="webclaw-btn-mic" aria-label="Send audio message - hold to record" title="Hold to talk">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+          <button class="webclaw-btn-send" aria-label="Send message" title="Send">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
             </svg>
           </button>
         </div>
       </div>
       <button class="webclaw-fab" aria-label="Open WebClaw chat" title="Chat with WebClaw">
-        <canvas id="wc-fab-avatar" width="40" height="40" style="border-radius:50%;"></canvas>
+        <canvas id="wc-fab-avatar" width="128" height="128" style="width:64px;height:64px;border-radius:50%;"></canvas>
       </button>
     `;
 
@@ -382,19 +351,22 @@ class WebClawEmbed {
     this.panel = container.querySelector('.webclaw-panel')!;
     this.messagesEl = container.querySelector('.webclaw-messages')!;
     this.statusDot = container.querySelector('.webclaw-status-dot')!;
+    this.voiceBarEl = container.querySelector('.webclaw-voice-bar');
 
-    // Event listeners
+    // FAB avatar
+    const fabCanvas = container.querySelector('#wc-fab-avatar') as HTMLCanvasElement;
+    if (fabCanvas) {
+      this.avatar = new Avatar(fabCanvas, this.config.avatarColor!, 128, {
+        showLimbs: false, // Too small for limbs on FAB
+      });
+    }
+
+    // Events
     const fab = container.querySelector('.webclaw-fab')!;
     fab.addEventListener('click', () => this.toggle());
 
     const closeBtn = container.querySelector('.webclaw-btn-close')!;
     closeBtn.addEventListener('click', () => this.close());
-
-    // Initialize avatar on FAB
-    const fabCanvas = container.querySelector('#wc-fab-avatar') as HTMLCanvasElement;
-    if (fabCanvas) {
-      this.avatar = new Avatar(fabCanvas, this.config.avatarColor!, 40);
-    }
 
     const input = container.querySelector('input')!;
     input.addEventListener('keydown', (e) => {
@@ -404,8 +376,41 @@ class WebClawEmbed {
       }
     });
 
-    const micBtn = container.querySelector('.webclaw-btn-mic')! as HTMLElement;
-    micBtn.addEventListener('click', () => this.toggleMic(micBtn));
+    const sendBtn = container.querySelector('.webclaw-btn-send')! as HTMLElement;
+    sendBtn.addEventListener('click', () => {
+      if (input.value.trim()) {
+        this.sendText(input.value.trim());
+        input.value = '';
+      }
+    });
+
+    // Agent switch pills
+    container.querySelectorAll('.webclaw-agent-pill').forEach((pill: Element) => {
+      pill.addEventListener('click', () => {
+        const agent = (pill as HTMLElement).dataset.agent as 'site' | 'personal';
+        this.switchAgent(agent);
+      });
+    });
+  }
+
+  private bindAudioEvents(): void {
+    this.audio.on('stateChange', (state) => {
+      switch (state) {
+        case 'listening': this.avatar?.setState('listening'); break;
+        case 'speaking': this.avatar?.setState('speaking'); break;
+        case 'playing': this.avatar?.setState('speaking'); break;
+        case 'idle': this.avatar?.setState('idle'); break;
+      }
+    });
+
+    this.audio.on('speechStart', () => {
+      // Barge-in: stop playback when user starts speaking
+      this.audio.stopPlayback();
+    });
+
+    this.audio.on('amplitude', (amplitude) => {
+      this.avatar?.setMouthTarget(Math.min(1, amplitude * 25));
+    });
   }
 
   private bindGatewayEvents(): void {
@@ -417,8 +422,12 @@ class WebClawEmbed {
       const snapshot = captureSnapshot();
       this.gateway.sendDomSnapshot(snapshot, window.location.href);
 
-      // Send initial screenshot for vision context
       this.sendScreenshotToGateway();
+
+      // Start seamless voice on connect
+      if (this.config.seamless) {
+        this.startSeamlessVoice();
+      }
     });
 
     this.gateway.on('disconnected', () => {
@@ -432,16 +441,26 @@ class WebClawEmbed {
       this.removeTypingIndicator();
       this.addMessage('agent', msg.text as string);
       this.avatar?.setState('speaking');
-      // Return to idle after a delay
-      setTimeout(() => this.avatar?.setState('idle'), 2000);
+      setTimeout(() => this.avatar?.setState(
+        this.audio.isCapturing ? 'listening' : 'idle'
+      ), 2000);
+
+      // Check for voice agent-switch commands
+      this.checkVoiceSwitchCommand(msg.text as string);
     });
 
     this.gateway.on('audio', (msg) => {
       this.removeTypingIndicator();
       this.avatar?.setState('speaking');
       this.audio.playAudio(msg.data as string);
-      // Audio playback will last a while; return to idle after
-      setTimeout(() => this.avatar?.setState('idle'), 3000);
+
+      // Connect playback analyser to avatar for lip-sync
+      const analyser = this.audio.getPlaybackAnalyser();
+      if (analyser && this.avatar) {
+        // Use the playback context for lip-sync
+        const ctx = (analyser as any).context as AudioContext;
+        if (ctx) this.avatar.connectAudio(ctx, analyser);
+      }
     });
 
     this.gateway.on('action', async (msg) => {
@@ -450,7 +469,6 @@ class WebClawEmbed {
       this.avatar?.setState('acting');
       const selector = (msg.args as Record<string, unknown>)?.selector as string || msg.selector as string || '';
 
-      // Animate avatar flying to target element
       if (selector) {
         const fab = this.shadow.querySelector('.webclaw-fab');
         if (fab) {
@@ -462,7 +480,6 @@ class WebClawEmbed {
         }
       }
 
-      // Execute DOM action and send result back
       try {
         const result = await executeAction({
           action: msg.action as string,
@@ -470,14 +487,54 @@ class WebClawEmbed {
           ...(msg.args as Record<string, unknown> || {}),
         });
         this.gateway.sendActionResult(result.action_id, result);
-        // Show action feedback
         this.addMessage('agent', `⚡ ${result.message || result.action_id}`);
       } catch (e: any) {
         this.addMessage('agent', `⚡ Action error: ${e.message}`);
       }
       this.removeTypingIndicator();
-      setTimeout(() => this.avatar?.setState('idle'), 1000);
+      setTimeout(() => this.avatar?.setState(
+        this.audio.isCapturing ? 'listening' : 'idle'
+      ), 1000);
     });
+  }
+
+  private async startSeamlessVoice(): Promise<void> {
+    try {
+      await this.audio.startSeamless((data) => {
+        this.gateway.sendAudio(data);
+      });
+      this.setStatus('Listening...');
+      this.statusDot.className = 'webclaw-status-dot listening';
+      if (this.voiceBarEl) {
+        this.voiceBarEl.classList.add('active');
+      }
+    } catch (e) {
+      console.error('[WebClaw] Seamless voice error:', e);
+      this.setStatus('Connected (mic unavailable)');
+    }
+  }
+
+  private switchAgent(agent: 'site' | 'personal'): void {
+    this.currentAgent = agent;
+
+    // Update pills
+    this.shadow.querySelectorAll('.webclaw-agent-pill').forEach((pill: Element) => {
+      const el = pill as HTMLElement;
+      el.classList.toggle('active', el.dataset.agent === agent);
+    });
+
+    // Notify gateway
+    this.gateway.sendText(`[SYSTEM: Switched to ${agent} agent]`);
+    this.addMessage('agent', `Switched to ${agent === 'personal' ? 'your personal agent' : 'the site agent'}.`);
+  }
+
+  private checkVoiceSwitchCommand(text: string): void {
+    const lower = text.toLowerCase();
+    if (lower.includes('switching to your personal') || lower.includes('switching to my claw')) {
+      this.switchAgent('personal');
+    } else if (lower.includes('switching to site') || lower.includes('switching back')) {
+      this.switchAgent('site');
+    }
   }
 
   private async toggle(): Promise<void> {
@@ -505,46 +562,33 @@ class WebClawEmbed {
   }
 
   private sendText(text: string): void {
+    // Check for switch commands
+    const lower = text.toLowerCase();
+    if (lower.includes('switch to my') || lower.includes('my agent') || lower.includes('use my claw')) {
+      this.switchAgent('personal');
+      return;
+    }
+    if (lower.includes('switch to site') || lower.includes('site agent')) {
+      this.switchAgent('site');
+      return;
+    }
+
     this.addMessage('user', text);
     this.gateway.sendText(text);
   }
 
-  private async toggleMic(btn: HTMLElement): Promise<void> {
-    if (this.isMicActive) {
-      this.audio.stopCapture();
-      btn.classList.remove('active');
-      this.isMicActive = false;
-      this.avatar?.setState('idle');
-    } else {
-      try {
-        await this.audio.startCapture((data) => {
-          this.gateway.sendAudio(data);
-        });
-        btn.classList.add('active');
-        this.isMicActive = true;
-        this.avatar?.setState('listening');
-      } catch (e) {
-        console.error('[WebClaw] Mic access denied:', e);
-      }
-    }
-  }
-
   private addMessage(role: 'user' | 'agent', text: string): void {
-    // Create wrapper for message and timestamp
     const wrapper = document.createElement('div');
     wrapper.className = 'webclaw-msg-wrapper';
 
-    // Create message element
     const msg = document.createElement('div');
     msg.className = `webclaw-msg ${role}`;
     msg.textContent = text;
 
-    // Create timestamp
     const timestamp = document.createElement('div');
     timestamp.className = 'webclaw-msg-timestamp';
     const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    timestamp.textContent = timeStr;
+    timestamp.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     wrapper.appendChild(msg);
     wrapper.appendChild(timestamp);
@@ -553,23 +597,13 @@ class WebClawEmbed {
   }
 
   private showTypingIndicator(): void {
-    if (this.typingIndicator) return; // Already showing
-
+    if (this.typingIndicator) return;
     const wrapper = document.createElement('div');
     wrapper.className = 'webclaw-msg-wrapper';
-
     const indicator = document.createElement('div');
     indicator.className = 'webclaw-msg typing';
     indicator.textContent = 'Agent is thinking...';
-
-    const timestamp = document.createElement('div');
-    timestamp.className = 'webclaw-msg-timestamp';
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    timestamp.textContent = timeStr;
-
     wrapper.appendChild(indicator);
-    wrapper.appendChild(timestamp);
     this.messagesEl.appendChild(wrapper);
     this.typingIndicator = wrapper;
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
@@ -589,14 +623,9 @@ class WebClawEmbed {
 
   private setConnectionState(state: 'connected' | 'connecting' | 'disconnected'): void {
     this.connectionState = state;
-
-    // Update status dot appearance
-    this.statusDot.classList.remove('connecting', 'disconnected');
-    if (state === 'connecting') {
-      this.statusDot.classList.add('connecting');
-    } else if (state === 'disconnected') {
-      this.statusDot.classList.add('disconnected');
-    }
+    this.statusDot.classList.remove('connecting', 'disconnected', 'listening');
+    if (state === 'connecting') this.statusDot.classList.add('connecting');
+    else if (state === 'disconnected') this.statusDot.classList.add('disconnected');
   }
 
   private async sendScreenshotToGateway(): Promise<void> {
