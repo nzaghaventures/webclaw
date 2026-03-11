@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 # Firestore availability flag
 _firestore_available = False
 _db = None
+_db_init_attempted = False
 
 try:
     from google.cloud import firestore
@@ -39,20 +40,58 @@ def _validate_content_length(content: str, max_length: int = 1000000) -> None:
 
 
 def _get_db():
-    """Lazy-initialize Firestore client."""
-    global _db
-    if _db is None and _firestore_available:
-        project = os.environ.get("GOOGLE_CLOUD_PROJECT")
-        if project:
-            try:
-                _db = firestore.Client(project=project, database="webclaw")
-                logger.info(f"Firestore connected: project={project}, database=webclaw")
-            except Exception as e:
-                logger.error(f"Failed to initialize Firestore: {e}", exc_info=True)
-                _db = None
-        else:
-            logger.warning("GOOGLE_CLOUD_PROJECT not set; Firestore disabled")
-    return _db
+    """Lazy-initialize Firestore client.
+
+    Connection strategies (in order of priority):
+    1. Firestore Emulator   – if FIRESTORE_EMULATOR_HOST is set
+    2. Cloud Firestore      – if GOOGLE_CLOUD_PROJECT is set
+    3. Application Default  – try ADC (works in Cloud Run / local gcloud auth)
+    """
+    global _db, _db_init_attempted
+    if _db is not None:
+        return _db
+    if _db_init_attempted or not _firestore_available:
+        return None
+    _db_init_attempted = True
+
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
+    emulator = os.environ.get("FIRESTORE_EMULATOR_HOST", "").strip()
+
+    # Strategy 1: Emulator (local dev)
+    if emulator:
+        try:
+            # When emulator host is set, the client auto-connects to it.
+            # Project can be any string for the emulator.
+            emu_project = project or "webclaw-dev"
+            _db = firestore.Client(project=emu_project, database="webclaw")
+            logger.info(f"Firestore connected to EMULATOR at {emulator} (project={emu_project})")
+            return _db
+        except Exception as e:
+            logger.error(f"Failed to connect to Firestore emulator: {e}", exc_info=True)
+            return None
+
+    # Strategy 2: Explicit project
+    if project:
+        try:
+            _db = firestore.Client(project=project, database="webclaw")
+            logger.info(f"Firestore connected: project={project}, database=webclaw")
+            return _db
+        except Exception as e:
+            logger.error(f"Failed to initialize Firestore with project={project}: {e}", exc_info=True)
+            return None
+
+    # Strategy 3: Application Default Credentials (Cloud Run, gcloud auth)
+    try:
+        _db = firestore.Client(database="webclaw")
+        logger.info("Firestore connected via Application Default Credentials")
+        return _db
+    except Exception as e:
+        logger.warning(
+            f"Firestore unavailable (no GOOGLE_CLOUD_PROJECT, no emulator, ADC failed): {e}. "
+            "Using in-memory storage only. Set GOOGLE_CLOUD_PROJECT or "
+            "FIRESTORE_EMULATOR_HOST to enable persistence."
+        )
+        return None
 
 
 def check_health() -> bool:
