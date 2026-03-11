@@ -105,14 +105,22 @@ export class GatewayClient {
     }
 
     if (eventType === 'gemini') {
-      // Agent text / output transcription
+      // Agent text from model_turn (direct text response)
+      console.log('[WebClaw] Received gemini text:', msg.text?.substring(0, 100));
       this.emit('text', { type: 'text', text: msg.text });
+      return;
+    }
+
+    if (eventType === 'output_transcription') {
+      // Audio transcription — only show if no direct text was received recently
+      console.log('[WebClaw] Received output transcription:', msg.text?.substring(0, 100));
       this.emit('transcription', { type: 'transcription', text: msg.text });
       return;
     }
 
     if (eventType === 'user') {
       // Input transcription
+      console.log('[WebClaw] Input transcription:', msg.text?.substring(0, 100));
       this.emit('input_transcription', { type: 'input_transcription', text: msg.text });
       return;
     }

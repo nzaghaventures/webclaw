@@ -330,6 +330,7 @@ class WebClawEmbed {
   private voiceBarEl: HTMLElement | null = null;
   private welcomeMessage: string = '';
   private personaName: string = 'WebClaw';
+  private lastTextTime: number = 0;
 
   constructor(config: WebClawConfig) {
     this.config = config;
@@ -558,14 +559,18 @@ class WebClawEmbed {
 
     this.gateway.on('text', (msg) => {
       this.removeTypingIndicator();
-      this.addMessage('agent', msg.text as string);
+      const text = msg.text as string;
+      if (text) {
+        this.addMessage('agent', text);
+        this.lastTextTime = Date.now();
+      }
       this.avatar?.setState('speaking');
       setTimeout(() => this.avatar?.setState(
         this.audio.isCapturing ? 'listening' : 'idle'
       ), 2000);
 
       // Check for voice agent-switch commands
-      this.checkVoiceSwitchCommand(msg.text as string);
+      if (text) this.checkVoiceSwitchCommand(text);
     });
 
     this.gateway.on('audio', (msg) => {
@@ -617,9 +622,10 @@ class WebClawEmbed {
     });
 
     // Handle transcription (agent's spoken words transcribed to text)
+    // Only show if no direct text event was received in the last 2 seconds
+    // (prevents duplicate messages when both model_turn text and transcription arrive)
     this.gateway.on('transcription', (msg) => {
-      // Show transcribed agent speech in chat panel too
-      if (msg.text) {
+      if (msg.text && (Date.now() - this.lastTextTime > 2000)) {
         this.addMessage('agent', msg.text as string);
       }
     });

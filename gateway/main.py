@@ -795,8 +795,20 @@ async def websocket_endpoint(
                 try:
                     while True:
                         text = await text_input_queue.get()
-                        logger.debug(f"Sending text to Gemini: {text[:100]}")
-                        await session.send_realtime_input(text=text)
+                        logger.info(f"Sending text to Gemini as client turn: {text[:200]}")
+                        # IMPORTANT: Use send_client_content (not send_realtime_input)
+                        # so Gemini treats this as a conversational turn and responds.
+                        # send_realtime_input(text=...) only appends context without
+                        # triggering a model response.
+                        await session.send_client_content(
+                            turns=[
+                                types.Content(
+                                    parts=[types.Part(text=text)],
+                                    role="user",
+                                )
+                            ],
+                            turn_complete=True,
+                        )
                 except asyncio.CancelledError:
                     pass
 
@@ -830,11 +842,13 @@ async def websocket_endpoint(
                                     for part in server_content.model_turn.parts:
                                         if part.inline_data:
                                             # Send raw audio bytes to client
+                                            logger.debug(f"Sending audio chunk: {len(part.inline_data.data)} bytes")
                                             await websocket.send_bytes(
                                                 part.inline_data.data
                                             )
                                         if part.text:
                                             # Text response from model
+                                            logger.info(f"Gemini text (model_turn): {part.text[:200]}")
                                             await event_queue.put({
                                                 "type": "gemini",
                                                 "text": part.text,
@@ -843,6 +857,7 @@ async def websocket_endpoint(
                                 # Input transcription
                                 if (server_content.input_transcription
                                         and server_content.input_transcription.text):
+                                    logger.info(f"Input transcription: {server_content.input_transcription.text[:200]}")
                                     await event_queue.put({
                                         "type": "user",
                                         "text": server_content.input_transcription.text,
@@ -856,8 +871,9 @@ async def websocket_endpoint(
                                 # Output transcription
                                 if (server_content.output_transcription
                                         and server_content.output_transcription.text):
+                                    logger.info(f"Output transcription: {server_content.output_transcription.text[:200]}")
                                     await event_queue.put({
-                                        "type": "gemini",
+                                        "type": "output_transcription",
                                         "text": server_content.output_transcription.text,
                                     })
                                     session_messages.append({
@@ -868,10 +884,12 @@ async def websocket_endpoint(
 
                                 # Turn complete
                                 if server_content.turn_complete:
+                                    logger.debug("Turn complete")
                                     await event_queue.put({"type": "turn_complete"})
 
                                 # Interrupted (barge-in)
                                 if server_content.interrupted:
+                                    logger.debug("Interrupted (barge-in)")
                                     await event_queue.put({"type": "interrupted"})
 
                             # Tool calls (DOM actions)
@@ -1012,10 +1030,13 @@ async def websocket_endpoint(
                 while True:
                     event = await event_queue.get()
                     if event is None:
+                        logger.debug("forward_events: received sentinel, stopping")
                         break  # sentinel — session ended
                     try:
+                        logger.info(f"Forwarding event to client: type={event.get('type')}, text={str(event.get('text', ''))[:100]}")
                         await websocket.send_json(event)
-                    except Exception:
+                    except Exception as e:
+                        logger.error(f"forward_events: failed to send event {event.get('type')}: {e}")
                         break
 
             # Launch all tasks concurrently
