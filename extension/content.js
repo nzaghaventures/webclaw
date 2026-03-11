@@ -110,15 +110,69 @@
     showLimbs = config.showLimbs ?? true;
     seamlessVoice = config.seamlessVoice ?? config.voiceMode ?? true;
 
+    const gatewayUrl = config.gatewayUrl || 'http://localhost:8080';
+
     createOverlay();
-    connectGateway(config.gatewayUrl || 'http://localhost:8080', config.sendDom ?? true);
+    connectGateway(gatewayUrl, config.sendDom ?? true);
 
     // Seamless voice: auto-start mic
     if (seamlessVoice) {
       startSeamlessMic();
     }
 
+    // If auto-activated (Personal Claw), fetch welcome config and speak it aloud
+    if (config.autoActivate) {
+      fetchAndSpeakWelcome(gatewayUrl);
+    }
+
     notifyStatus();
+  }
+
+  /**
+   * Fetch the site's welcome message from the gateway REST API
+   * and speak it aloud using Web Speech API (TTS).
+   */
+  async function fetchAndSpeakWelcome(gatewayUrl) {
+    const siteId = window.location.hostname.replace(/\./g, '_') || 'personal';
+    try {
+      const res = await fetch(`${gatewayUrl}/api/sites/${siteId}/welcome`);
+      if (res.ok) {
+        const data = await res.json();
+        const welcomeMsg = data.welcome_message || "Hi! I'm here to help.";
+        const personaName = data.persona_name || 'WebClaw';
+
+        // Update panel title
+        const titleEl = overlay?.querySelector('#wc-panel-title');
+        if (titleEl) titleEl.textContent = personaName;
+
+        // Add welcome message to chat
+        addMessage('agent', welcomeMsg);
+
+        // Speak the welcome message aloud using Web Speech API
+        if ('speechSynthesis' in window) {
+          const utterance = new SpeechSynthesisUtterance(welcomeMsg);
+          utterance.rate = 1.0;
+          utterance.pitch = 1.0;
+          utterance.volume = 0.8;
+
+          // Set avatar to speaking while TTS plays
+          setAvatarState('speaking');
+          utterance.onend = () => {
+            setAvatarState(seamlessVoice ? 'listening' : 'idle');
+          };
+          utterance.onerror = () => {
+            setAvatarState(seamlessVoice ? 'listening' : 'idle');
+          };
+
+          // Small delay so UI renders first
+          setTimeout(() => {
+            window.speechSynthesis.speak(utterance);
+          }, 800);
+        }
+      }
+    } catch (e) {
+      console.warn('[WebClaw] Could not fetch welcome config:', e);
+    }
   }
 
   function deactivate() {
@@ -334,32 +388,55 @@
   }
 
   function handleGatewayEvent(event) {
+    // Error events
+    if (event.type === 'error') {
+      addMessage('error', `Connection issue: ${event.error || 'Unknown error'}`);
+      setAvatarState('idle');
+      return;
+    }
+
+    // Negotiation acknowledgment
     if (event.type === 'negotiate_ack') {
       const persona = event.persona?.name || 'WebClaw';
       addMessage('system', `Connected to ${persona}`);
       return;
     }
 
+    // Extract parts from various ADK event structures
+    let parts = [];
     if (event.content?.parts) {
-      for (const part of event.content.parts) {
-        if (part.text) {
-          addMessage('agent', part.text);
-          setAvatarState('speaking');
-          setTimeout(() => setAvatarState(seamlessVoice ? 'listening' : 'idle'), 2000);
+      parts = event.content.parts;
+    } else if (event.serverContent?.modelTurn?.parts) {
+      // Gemini Live native format
+      parts = event.serverContent.modelTurn.parts;
+    }
 
-          // Relay to popup
-          chrome.runtime?.sendMessage({ type: 'AGENT_MESSAGE', text: part.text }).catch(() => {});
+    for (const part of parts) {
+      if (part.text) {
+        addMessage('agent', part.text);
+        setAvatarState('speaking');
+        setTimeout(() => setAvatarState(seamlessVoice ? 'listening' : 'idle'), 2000);
 
-          // Check for agent switch voice commands
-          checkVoiceSwitchCommand(part.text);
-        }
-        if (part.function_call) {
-          executeAction(part.function_call);
-        }
-        if (part.inline_data) {
-          playAudioChunk(part.inline_data.data);
-        }
+        // Relay to popup
+        chrome.runtime?.sendMessage({ type: 'AGENT_MESSAGE', text: part.text }).catch(() => {});
+
+        // Check for agent switch voice commands
+        checkVoiceSwitchCommand(part.text);
       }
+      // Tool calls (handles both snake_case and camelCase)
+      if (part.function_call || part.functionCall) {
+        executeAction(part.function_call || part.functionCall);
+      }
+      // Audio (handles both snake_case and camelCase)
+      if (part.inline_data || part.inlineData) {
+        const inlineData = part.inline_data || part.inlineData;
+        playAudioChunk(inlineData.data);
+      }
+    }
+
+    // Handle output transcription (agent's spoken words as text)
+    if (event.outputTranscription) {
+      addMessage('agent', event.outputTranscription);
     }
   }
 
