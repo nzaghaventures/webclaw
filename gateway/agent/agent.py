@@ -11,7 +11,7 @@ from .tools import DOM_TOOLS
 # Default: gemini-live-2.5-flash-native-audio (stable native-audio model)
 # Replaces the deprecated gemini-live-2.5-flash-preview-native-audio-09-2025
 # (being removed March 19, 2026).
-_MODEL = os.environ.get("WEBCLAW_MODEL", "gemini-live-2.5-flash-native-audio")
+_MODEL = os.environ.get("WEBCLAW_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
 
 root_agent = Agent(
     name="webclaw_agent",

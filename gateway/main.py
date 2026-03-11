@@ -1,7 +1,8 @@
-"""WebClaw Gateway: FastAPI application with WebSocket streaming via ADK Gemini Live API."""
+"""WebClaw Gateway: FastAPI application with WebSocket streaming via google-genai Live API."""
 
 import asyncio
 import base64
+import inspect
 import json
 import logging
 import os
@@ -18,18 +19,15 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from google.adk.agents.live_request_queue import LiveRequestQueue
-from google.adk.agents.run_config import RunConfig, StreamingMode
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
+from google import genai
 from google.genai import types
 from pydantic import BaseModel, field_validator
 
 # Load environment variables
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
-# Import agent after env is loaded
-from agent.agent import root_agent  # noqa: E402
+from agent.prompts import WEBCLAW_SYSTEM_PROMPT, build_site_prompt  # noqa: E402
+from agent.tools import DOM_TOOLS  # noqa: E402
 from context.broker import (  # noqa: E402
     SiteConfig,
     build_agent_context,
@@ -58,17 +56,52 @@ logging.basicConfig(
 logger = logging.getLogger("webclaw.gateway")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
-# ── Model sanity check ──────────────────────────────────────
-_active_model = os.environ.get("WEBCLAW_MODEL", "")
-_KNOWN_LIVE_MODELS = {"gemini-2.0-flash-exp", "gemini-2.0-flash-live-001", "gemini-live-2.5-flash-native-audio"}
-if _active_model and _active_model not in _KNOWN_LIVE_MODELS and "live" not in _active_model and "flash-exp" not in _active_model:
-    logger.warning(
-        "WEBCLAW_MODEL=%s may not support bidiGenerateContent (Live API). "
-        "Recommended: gemini-2.0-flash-exp (supports audio+text+tools). "
-        "Set the correct model in gateway/.env",
-        _active_model,
-    )
-logger.info("Active model: %s", root_agent.model)
+# ── Model & Client ──────────────────────────────────────────
+WEBCLAW_MODEL = os.environ.get("WEBCLAW_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+
+# Build the genai Client (direct SDK — no ADK wrapper)
+# Use v1alpha for preview/native-audio models (required for bidiGenerateContent)
+genai_client = genai.Client(api_key=GOOGLE_API_KEY, http_options={"api_version": "v1alpha"})
+
+# Build tool declarations from DOM_TOOLS functions for genai Live API
+def _build_tool_declarations():
+    """Convert our DOM tool functions into google.genai FunctionDeclaration list."""
+    declarations = []
+    for func in DOM_TOOLS:
+        sig = inspect.signature(func)
+        properties = {}
+        required = []
+        for param_name, param in sig.parameters.items():
+            annotation = param.annotation
+            if annotation == str or annotation == inspect.Parameter.empty:
+                prop_type = "STRING"
+            elif annotation == int:
+                prop_type = "INTEGER"
+            elif annotation == bool:
+                prop_type = "BOOLEAN"
+            else:
+                prop_type = "STRING"
+            properties[param_name] = types.Schema(type=prop_type, description="")
+            if param.default is inspect.Parameter.empty:
+                required.append(param_name)
+        declarations.append(types.FunctionDeclaration(
+            name=func.__name__,
+            description=(func.__doc__ or "").split("\n")[0].strip(),
+            parameters=types.Schema(
+                type="OBJECT",
+                properties=properties,
+                required=required if required else None,
+            ),
+        ))
+    return declarations
+
+TOOL_DECLARATIONS = _build_tool_declarations()
+
+# Build a mapping from function name -> callable for tool execution
+TOOL_MAPPING = {func.__name__: func for func in DOM_TOOLS}
+
+logger.info("Active model: %s", WEBCLAW_MODEL)
 
 APP_NAME = "webclaw-gateway"
 
@@ -195,21 +228,17 @@ async def error_handler_middleware(request: Request, call_next):
             status_code=500,
         )
 
-# Session + Runner
-session_service = InMemorySessionService()
-runner = Runner(app_name=APP_NAME, agent=root_agent, session_service=session_service)
-
 # ── Startup diagnostics ──
-_api_key = os.environ.get("GOOGLE_API_KEY", "")
 _gcp_project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 _emulator = os.environ.get("FIRESTORE_EMULATOR_HOST", "")
 logger.info("=" * 60)
-logger.info(f"WebClaw Gateway v0.2.0")
-logger.info(f"  Model       : {root_agent.model}")
-logger.info(f"  API Key     : {'set (' + _api_key[:8] + '...)' if _api_key else 'NOT SET'}")
+logger.info("WebClaw Gateway v0.3.0 (google-genai SDK)")
+logger.info(f"  Model       : {WEBCLAW_MODEL}")
+logger.info(f"  API Key     : {'set (' + GOOGLE_API_KEY[:8] + '...)' if GOOGLE_API_KEY else 'NOT SET'}")
 logger.info(f"  GCP Project : {_gcp_project or 'NOT SET (Firestore will try ADC)'}")
 logger.info(f"  Emulator    : {_emulator or 'not configured'}")
 logger.info(f"  Firestore   : {'available' if check_health() else 'unavailable (in-memory only)'}")
+logger.info(f"  Tools       : {len(TOOL_DECLARATIONS)} DOM tools registered")
 logger.info("=" * 60)
 
 # Serve static assets (logos, favicons)
@@ -241,7 +270,7 @@ if dashboard_dir.exists():
 @app.get("/health")
 async def health():
     """Health check for Cloud Run."""
-    return {"status": "ok", "service": "webclaw-gateway", "version": "0.2.0"}
+    return {"status": "ok", "service": "webclaw-gateway", "version": "0.3.0"}
 
 
 @app.get("/api/health")
@@ -252,7 +281,7 @@ async def api_health():
         return {
             "status": "ok",
             "service": "webclaw-gateway",
-            "version": "0.2.0",
+            "version": "0.3.0",
             "firestore": "connected" if firestore_ok else "disconnected",
         }
     except Exception as e:
@@ -261,7 +290,7 @@ async def api_health():
             {
                 "status": "degraded",
                 "service": "webclaw-gateway",
-                "version": "0.2.0",
+                "version": "0.3.0",
                 "firestore": "error",
                 "error": str(e),
             },
@@ -660,7 +689,7 @@ async def site_stats(site_id: str):
 
 
 # ========================================
-# WebSocket: Bidirectional Streaming
+# WebSocket: Bidirectional Streaming (google-genai SDK)
 # ========================================
 
 
@@ -670,7 +699,7 @@ async def websocket_endpoint(
     site_id: str,
     session_id: str,
 ) -> None:
-    """WebSocket endpoint for bidirectional streaming with ADK.
+    """WebSocket endpoint for bidirectional streaming using google-genai SDK directly.
 
     Protocol (client -> server):
         Binary frames: Raw PCM audio (16kHz, 16-bit, mono)
@@ -683,17 +712,20 @@ async def websocket_endpoint(
             {"type": "negotiate", "capabilities": {...}}
 
     Protocol (server -> client):
-        Text frames (JSON): ADK events including:
-            - Agent text responses
-            - Audio data (base64 encoded)
-            - Tool calls (DOM actions for embed to execute)
+        Binary frames: Raw PCM audio from Gemini
+        Text frames (JSON):
+            {"type": "user", "text": "..."}           - input transcription
+            {"type": "gemini", "text": "..."}          - output transcription
+            {"type": "tool_call", "name": "...", ...}  - DOM action tool calls
+            {"type": "turn_complete"}
+            {"type": "interrupted"}
+            {"type": "error", "error": "..."}
     """
     logger.info(f"WebSocket connect: site={site_id} session={session_id}")
     await websocket.accept()
 
     # Build context for this site
     agent_context = build_agent_context(site_id)
-    user_id = f"user_{session_id[:8]}"
 
     # Track session messages for history
     session_messages: list[dict] = []
@@ -702,209 +734,333 @@ async def websocket_endpoint(
     # Record connection
     record_event(site_id, "sessions_total")
 
-    # Determine model capabilities
-    model_name = root_agent.model or ""
-    model_lower = model_name.lower()
-    is_live_model = any(tag in model_lower for tag in ["live", "native-audio"])
+    # Build system instruction from site config
+    site_config = get_site_config(site_id)
+    if site_config:
+        system_text = build_site_prompt(vars(site_config))
+    else:
+        system_text = WEBCLAW_SYSTEM_PROMPT
 
-    logger.info(f"Using model: {model_name} (live={is_live_model})")
+    # Append knowledge base context
+    if agent_context.get("system_prompt_additions"):
+        system_text += f"\n\n{agent_context['system_prompt_additions']}"
 
-    # Both live and non-live models need audio transcription for the
-    # bidirectional streaming pipeline to work correctly.
-    run_config = RunConfig(
-        streaming_mode=StreamingMode.BIDI,
-        response_modalities=["AUDIO", "TEXT"],
+    logger.info(f"Using model: {WEBCLAW_MODEL}")
+
+    # Configure the Live API session
+    live_config = types.LiveConnectConfig(
+        response_modalities=[types.Modality.AUDIO],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                    voice_name="Puck"
+                )
+            )
+        ),
+        system_instruction=types.Content(
+            parts=[types.Part(text=system_text)]
+        ),
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
-        session_resumption=types.SessionResumptionConfig(),
+        tools=[types.Tool(function_declarations=TOOL_DECLARATIONS)] if TOOL_DECLARATIONS else [],
     )
 
-    # Get or create session
-    session = await session_service.get_session(
-        app_name=APP_NAME, user_id=user_id, session_id=session_id,
-    )
-    if not session:
-        await session_service.create_session(
-            app_name=APP_NAME, user_id=user_id, session_id=session_id,
-        )
+    # Async queues for routing client input to the Gemini session
+    audio_input_queue: asyncio.Queue[bytes] = asyncio.Queue()
+    text_input_queue: asyncio.Queue[str] = asyncio.Queue()
+    video_input_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
-    live_request_queue = LiveRequestQueue()
+    try:
+        async with genai_client.aio.live.connect(
+            model=WEBCLAW_MODEL, config=live_config
+        ) as session:
+            logger.info(f"Live session established: {session_id}")
 
-    # Inject site context as initial message
-    if agent_context.get("system_prompt_additions"):
-        context_content = types.Content(
-            parts=[types.Part(text=f"[Site Context]\n{agent_context['system_prompt_additions']}")]
-        )
-        live_request_queue.send_content(context_content)
-
-    async def upstream_task() -> None:
-        """Receive from WebSocket, forward to LiveRequestQueue."""
-        try:
-            while True:
-                message = await websocket.receive()
-
-                if "bytes" in message:
-                    # Raw PCM audio
-                    audio_data = message["bytes"]
-                    audio_blob = types.Blob(
-                        mime_type="audio/pcm;rate=16000", data=audio_data,
-                    )
-                    live_request_queue.send_realtime(audio_blob)
-                    record_event(site_id, "audio_frames")
-
-                elif "text" in message:
-                    text_data = message["text"]
-                    try:
-                        msg = json.loads(text_data)
-                    except json.JSONDecodeError:
-                        logger.warning(f"Invalid JSON from client: {text_data[:100]}")
-                        continue
-
-                    msg_type = msg.get("type", "")
-
-                    if msg_type == "text":
-                        content = types.Content(
-                            parts=[types.Part(text=msg["text"])]
-                        )
-                        live_request_queue.send_content(content)
-                        session_messages.append({
-                            "role": "user", "type": "text",
-                            "text": msg["text"], "ts": time.time(),
-                        })
-                        record_event(site_id, "messages_text")
-
-                    elif msg_type == "dom_snapshot":
-                        snapshot_text = f"[Current Page: {msg.get('url', 'unknown')}]\n{msg.get('html', '')}"
-                        content = types.Content(
-                            parts=[types.Part(text=snapshot_text)]
-                        )
-                        live_request_queue.send_content(content)
-
-                    elif msg_type == "screenshot":
-                        # Vision-based page understanding
-                        image_data = base64.b64decode(msg["data"])
-                        image_blob = types.Blob(
-                            mime_type=msg.get("mimeType", "image/jpeg"),
-                            data=image_data,
-                        )
-                        # Send as content (not realtime) for vision analysis
-                        prompt = msg.get("prompt", "Describe what you see on this webpage.")
-                        content = types.Content(
-                            parts=[
-                                types.Part(text=f"[Screenshot of {msg.get('url', 'current page')}] {prompt}"),
-                                types.Part(inline_data=image_blob),
-                            ]
-                        )
-                        live_request_queue.send_content(content)
-                        record_event(site_id, "screenshots")
-
-                    elif msg_type == "image":
-                        image_data = base64.b64decode(msg["data"])
-                        image_blob = types.Blob(
-                            mime_type=msg.get("mimeType", "image/jpeg"),
-                            data=image_data,
-                        )
-                        live_request_queue.send_realtime(image_blob)
-
-                    elif msg_type == "dom_result":
-                        result_text = f"[Action Result] {json.dumps(msg.get('result', {}))}"
-                        content = types.Content(
-                            parts=[types.Part(text=result_text)]
-                        )
-                        live_request_queue.send_content(content)
-                        record_event(site_id, "actions_executed")
-
-                    elif msg_type == "negotiate":
-                        # Agent negotiation protocol: Personal Agent announces capabilities
-                        capabilities = msg.get("capabilities", {})
-                        negotiate_text = (
-                            "[Agent Negotiation] A Personal Agent is connecting.\n"
-                            f"Capabilities: {json.dumps(capabilities)}\n"
-                            "Merge the user's personal preferences with site knowledge. "
-                            "Keep user data private from site analytics."
-                        )
-                        content = types.Content(
-                            parts=[types.Part(text=negotiate_text)]
-                        )
-                        live_request_queue.send_content(content)
-                        # Send negotiation acknowledgment back to client
-                        ack = json.dumps({
-                            "type": "negotiate_ack",
-                            "site_permissions": agent_context.get("permissions", {}),
-                            "persona": {
-                                "name": get_site_config(site_id).persona_name if get_site_config(site_id) else "WebClaw",
-                                "voice": get_site_config(site_id).persona_voice if get_site_config(site_id) else "",
-                            },
-                        })
-                        await websocket.send_text(ack)
-                        record_event(site_id, "negotiations")
-
-        except WebSocketDisconnect:
-            pass  # Client disconnected; downstream will clean up
-
-    async def downstream_task() -> None:
-        """Receive ADK events, forward to WebSocket."""
-        try:
-            async for event in runner.run_live(
-                user_id=user_id,
-                session_id=session_id,
-                live_request_queue=live_request_queue,
-                run_config=run_config,
-            ):
-                event_json = event.model_dump_json(exclude_none=True, by_alias=True)
-                await websocket.send_text(event_json)
-
-                # Track agent text responses for session history
+            # ── Send queued audio to Gemini ──
+            async def send_audio():
                 try:
-                    event_data = json.loads(event_json)
-                    if event_data.get("content", {}).get("parts"):
-                        for part in event_data["content"]["parts"]:
-                            if "text" in part:
-                                session_messages.append({
-                                    "role": "agent", "type": "text",
-                                    "text": part["text"], "ts": time.time(),
-                                })
-                    if event_data.get("outputTranscription"):
-                        session_messages.append({
-                            "role": "agent", "type": "transcription",
-                            "text": event_data["outputTranscription"],
-                            "ts": time.time(),
-                        })
-                except Exception:
+                    while True:
+                        chunk = await audio_input_queue.get()
+                        await session.send_realtime_input(
+                            audio=types.Blob(
+                                data=chunk,
+                                mime_type="audio/pcm;rate=16000",
+                            )
+                        )
+                except asyncio.CancelledError:
                     pass
-        except Exception as e:
-            logger.error(f"Live API streaming error: {e}", exc_info=True)
-            # Send error event to client so the embed/extension knows
-            error_msg = json.dumps({
+
+            # ── Send queued text to Gemini ──
+            async def send_text():
+                try:
+                    while True:
+                        text = await text_input_queue.get()
+                        logger.debug(f"Sending text to Gemini: {text[:100]}")
+                        await session.send_realtime_input(text=text)
+                except asyncio.CancelledError:
+                    pass
+
+            # ── Send queued video/images to Gemini ──
+            async def send_video():
+                try:
+                    while True:
+                        chunk = await video_input_queue.get()
+                        await session.send_realtime_input(
+                            video=types.Blob(
+                                data=chunk,
+                                mime_type="image/jpeg",
+                            )
+                        )
+                except asyncio.CancelledError:
+                    pass
+
+            # ── Receive from Gemini, forward to client WebSocket ──
+            event_queue: asyncio.Queue = asyncio.Queue()
+
+            async def receive_from_gemini():
+                try:
+                    while True:
+                        async for response in session.receive():
+                            server_content = response.server_content
+                            tool_call = response.tool_call
+
+                            if server_content:
+                                # Audio data from model
+                                if server_content.model_turn:
+                                    for part in server_content.model_turn.parts:
+                                        if part.inline_data:
+                                            # Send raw audio bytes to client
+                                            await websocket.send_bytes(
+                                                part.inline_data.data
+                                            )
+                                        if part.text:
+                                            # Text response from model
+                                            await event_queue.put({
+                                                "type": "gemini",
+                                                "text": part.text,
+                                            })
+
+                                # Input transcription
+                                if (server_content.input_transcription
+                                        and server_content.input_transcription.text):
+                                    await event_queue.put({
+                                        "type": "user",
+                                        "text": server_content.input_transcription.text,
+                                    })
+                                    session_messages.append({
+                                        "role": "user", "type": "transcription",
+                                        "text": server_content.input_transcription.text,
+                                        "ts": time.time(),
+                                    })
+
+                                # Output transcription
+                                if (server_content.output_transcription
+                                        and server_content.output_transcription.text):
+                                    await event_queue.put({
+                                        "type": "gemini",
+                                        "text": server_content.output_transcription.text,
+                                    })
+                                    session_messages.append({
+                                        "role": "agent", "type": "transcription",
+                                        "text": server_content.output_transcription.text,
+                                        "ts": time.time(),
+                                    })
+
+                                # Turn complete
+                                if server_content.turn_complete:
+                                    await event_queue.put({"type": "turn_complete"})
+
+                                # Interrupted (barge-in)
+                                if server_content.interrupted:
+                                    await event_queue.put({"type": "interrupted"})
+
+                            # Tool calls (DOM actions)
+                            if tool_call:
+                                function_responses = []
+                                for fc in tool_call.function_calls:
+                                    func_name = fc.name
+                                    args = fc.args or {}
+
+                                    if func_name in TOOL_MAPPING:
+                                        try:
+                                            tool_func = TOOL_MAPPING[func_name]
+                                            if inspect.iscoroutinefunction(tool_func):
+                                                result = await tool_func(**args)
+                                            else:
+                                                loop = asyncio.get_running_loop()
+                                                result = await loop.run_in_executor(
+                                                    None, lambda f=tool_func, a=args: f(**a)
+                                                )
+                                        except Exception as e:
+                                            result = {"error": str(e)}
+
+                                        function_responses.append(
+                                            types.FunctionResponse(
+                                                name=func_name,
+                                                id=fc.id,
+                                                response={"result": result},
+                                            )
+                                        )
+                                        # Forward tool call to client for DOM execution
+                                        await event_queue.put({
+                                            "type": "tool_call",
+                                            "name": func_name,
+                                            "args": args,
+                                            "result": result,
+                                        })
+                                        record_event(site_id, "actions_executed")
+                                    else:
+                                        function_responses.append(
+                                            types.FunctionResponse(
+                                                name=func_name,
+                                                id=fc.id,
+                                                response={"error": f"Unknown tool: {func_name}"},
+                                            )
+                                        )
+
+                                # Send tool responses back to Gemini
+                                await session.send_tool_response(
+                                    function_responses=function_responses
+                                )
+
+                except Exception as e:
+                    await event_queue.put({"type": "error", "error": str(e)})
+                finally:
+                    await event_queue.put(None)  # sentinel
+
+            # ── Receive from client WebSocket, route to queues ──
+            async def receive_from_client():
+                try:
+                    while True:
+                        message = await websocket.receive()
+
+                        if "bytes" in message:
+                            await audio_input_queue.put(message["bytes"])
+                            record_event(site_id, "audio_frames")
+
+                        elif "text" in message:
+                            text_data = message["text"]
+                            try:
+                                msg = json.loads(text_data)
+                            except json.JSONDecodeError:
+                                logger.warning(f"Invalid JSON from client: {text_data[:100]}")
+                                continue
+
+                            msg_type = msg.get("type", "")
+
+                            if msg_type == "text":
+                                await text_input_queue.put(msg["text"])
+                                session_messages.append({
+                                    "role": "user", "type": "text",
+                                    "text": msg["text"], "ts": time.time(),
+                                })
+                                record_event(site_id, "messages_text")
+
+                            elif msg_type == "dom_snapshot":
+                                snapshot_text = (
+                                    f"[Current Page: {msg.get('url', 'unknown')}]\n"
+                                    f"{msg.get('html', '')}"
+                                )
+                                await text_input_queue.put(snapshot_text)
+
+                            elif msg_type == "screenshot":
+                                image_data = base64.b64decode(msg["data"])
+                                await video_input_queue.put(image_data)
+                                record_event(site_id, "screenshots")
+
+                            elif msg_type == "image":
+                                image_data = base64.b64decode(msg["data"])
+                                await video_input_queue.put(image_data)
+
+                            elif msg_type == "dom_result":
+                                result_text = (
+                                    f"[Action Result] "
+                                    f"{json.dumps(msg.get('result', {}))}"
+                                )
+                                await text_input_queue.put(result_text)
+                                record_event(site_id, "actions_executed")
+
+                            elif msg_type == "negotiate":
+                                capabilities = msg.get("capabilities", {})
+                                negotiate_text = (
+                                    "[Agent Negotiation] A Personal Agent is connecting.\n"
+                                    f"Capabilities: {json.dumps(capabilities)}\n"
+                                    "Merge the user's personal preferences with site knowledge. "
+                                    "Keep user data private from site analytics."
+                                )
+                                await text_input_queue.put(negotiate_text)
+                                # Send negotiation ack back to client
+                                sc = get_site_config(site_id)
+                                ack = json.dumps({
+                                    "type": "negotiate_ack",
+                                    "site_permissions": agent_context.get("permissions", {}),
+                                    "persona": {
+                                        "name": sc.persona_name if sc else "WebClaw",
+                                        "voice": sc.persona_voice if sc else "",
+                                    },
+                                })
+                                await websocket.send_text(ack)
+                                record_event(site_id, "negotiations")
+
+                except WebSocketDisconnect:
+                    pass
+                except Exception as e:
+                    logger.error(f"Error receiving from client: {e}")
+
+            # ── Forward event_queue events to client WebSocket as JSON ──
+            async def forward_events():
+                while True:
+                    event = await event_queue.get()
+                    if event is None:
+                        break  # sentinel — session ended
+                    try:
+                        await websocket.send_json(event)
+                    except Exception:
+                        break
+
+            # Launch all tasks concurrently
+            tasks = [
+                asyncio.create_task(send_audio()),
+                asyncio.create_task(send_text()),
+                asyncio.create_task(send_video()),
+                asyncio.create_task(receive_from_gemini()),
+                asyncio.create_task(receive_from_client()),
+                asyncio.create_task(forward_events()),
+            ]
+
+            # Wait for any task to finish (usually receive_from_gemini or receive_from_client)
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+            # Cancel remaining tasks
+            for task in pending:
+                task.cancel()
+            # Wait for cancellation
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    except WebSocketDisconnect:
+        logger.info(f"Client disconnected: session={session_id}")
+    except Exception as e:
+        logger.error(f"WebSocket/Live API error: {e}", exc_info=True)
+        # Send error to client if possible
+        try:
+            await websocket.send_json({
                 "type": "error",
                 "error": str(e),
                 "details": "The Live API connection failed. Check model name and API key.",
             })
-            try:
-                await websocket.send_text(error_msg)
-            except Exception:
-                pass  # WebSocket might already be closed
-
-    try:
-        await asyncio.gather(upstream_task(), downstream_task())
-    except WebSocketDisconnect:
-        logger.info(f"Client disconnected: session={session_id}")
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}", exc_info=True)
+        except Exception:
+            pass
     finally:
-        live_request_queue.close()
-
-        # Save session history to Firestore
+        # Save session history
         if session_messages:
             save_session_history(
                 site_id=site_id,
                 session_id=session_id,
-                user_id=user_id,
+                user_id=f"user_{session_id[:8]}",
                 messages=session_messages,
                 metadata={
                     "duration_seconds": time.time() - session_start,
                     "message_count": len(session_messages),
                 },
             )
-
         logger.info(f"Session ended: {session_id} ({len(session_messages)} messages)")
