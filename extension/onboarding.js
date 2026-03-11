@@ -212,147 +212,385 @@ document.getElementById('playback-btn')?.addEventListener('click', () => {
 });
 
 // =============================================
-// Step 2: Import
+// Step 2: Import from OpenClaw (Directory Access API)
 // =============================================
 
-function scanForInstallations() {
-  const container = document.getElementById('import-list-container');
+// Workspace files we look for (case-insensitive matching).
+// Each entry: { icon, label, desc, storageKey }
+const WORKSPACE_FILES = {
+  'USER.md':      { icon: '👤', label: 'User Profile',     desc: 'Your identity, preferences, and personal context',   storageKey: 'openclaw_user' },
+  'SOUL.md':      { icon: '🫀', label: 'Soul',             desc: 'Agent personality, tone, and behavioral core',       storageKey: 'openclaw_soul' },
+  'IDENTITY.md':  { icon: '🪪', label: 'Identity',         desc: 'Agent name, role, and how it introduces itself',     storageKey: 'openclaw_identity' },
+  'MEMORY.md':    { icon: '💭', label: 'Memory',           desc: 'Persistent memories and conversation context',       storageKey: 'openclaw_memory' },
+  'SKILLS.md':    { icon: '🧠', label: 'Skills',           desc: 'Capabilities, commands, and learned behaviors',      storageKey: 'openclaw_skills' },
+  'TOOLS.md':     { icon: '🔧', label: 'Tools',            desc: 'Available tools and integrations',                   storageKey: 'openclaw_tools' },
+  'AGENTS.md':    { icon: '🤖', label: 'Agents',           desc: 'Sub-agents, delegation rules, and agent roster',     storageKey: 'openclaw_agents' },
+  'KNOWLEDGE.md': { icon: '📚', label: 'Knowledge Base',   desc: 'Domain knowledge, FAQs, and reference material',     storageKey: 'openclaw_knowledge' },
+  'PROMPTS.md':   { icon: '📝', label: 'Prompts',          desc: 'System prompts and instruction templates',           storageKey: 'openclaw_prompts' },
+  'CONFIG.md':    { icon: '⚙️', label: 'Config',           desc: 'Runtime configuration and settings',                 storageKey: 'openclaw_config' },
+};
 
-  // Check for OpenClaw data in common locations
-  // In a real implementation, this would scan chrome.storage, local files, etc.
-  setTimeout(() => {
-    const found = checkForOpenClawData();
-    if (found.length > 0) {
-      let html = '<ul class="import-list">';
-      found.forEach(item => {
-        html += `
-          <li>
-            <div class="import-info">
-              <div class="import-icon">${item.icon}</div>
-              <div>
-                <div class="import-name">${item.name}</div>
-                <div class="import-desc">${item.desc}</div>
-              </div>
-            </div>
-            <button class="import-btn" onclick="importItem('${item.id}', this)">${item.count} items</button>
-          </li>
-        `;
-      });
-      html += '</ul>';
-      container.innerHTML = html;
-    } else {
-      container.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">📭</div>
-          <p>No existing OpenClaw installations found.<br>You can import manually below, or skip this step.</p>
-        </div>
-      `;
-    }
-  }, 1500);
-}
+// Also check for these JSON/YAML config files
+const CONFIG_FILES = {
+  'openclaw.json':  { icon: '⚙️', label: 'OpenClaw Config',  storageKey: 'openclaw_config_json' },
+  'config.json':    { icon: '⚙️', label: 'Config (JSON)',     storageKey: 'openclaw_config_json' },
+  'settings.json':  { icon: '⚙️', label: 'Settings',          storageKey: 'openclaw_settings_json' },
+  'manifest.json':  { icon: '📋', label: 'Manifest',          storageKey: 'openclaw_manifest' },
+  'soul.json':      { icon: '🫀', label: 'Soul (JSON)',       storageKey: 'openclaw_soul_json' },
+  'persona.json':   { icon: '🎭', label: 'Persona',           storageKey: 'openclaw_persona_json' },
+};
 
-function checkForOpenClawData() {
-  // Mock: check localStorage/storage for openclaw data
-  const items = [];
+// Known sub-directories to scan (one level deep)
+const WORKSPACE_DIRS = ['skills', 'tools', 'agents', 'knowledge', 'memory', 'prompts', 'personas', 'soul'];
+
+// State
+let dirHandle = null;   // FileSystemDirectoryHandle
+let foundFiles = [];    // { fileName, icon, label, desc, storageKey, content, size, fromDir? }
+
+// ── Open directory picker ────────────────────────────────
+async function openDirectoryPicker() {
   try {
-    const skills = localStorage.getItem('openclaw_skills');
-    if (skills) {
-      const parsed = JSON.parse(skills);
-      items.push({
-        id: 'skills',
-        icon: '🧠',
-        name: 'Skills',
-        desc: 'Custom agent skills and behaviors',
-        count: Array.isArray(parsed) ? parsed.length : 0,
-      });
-    }
-  } catch {}
+    dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+    const folderName = dirHandle.name;
 
-  try {
-    const personas = localStorage.getItem('openclaw_personas');
-    if (personas) {
-      const parsed = JSON.parse(personas);
-      items.push({
-        id: 'personas',
-        icon: '🎭',
-        name: 'Personas',
-        desc: 'Agent personality configurations',
-        count: Array.isArray(parsed) ? parsed.length : 0,
-      });
-    }
-  } catch {}
+    // Show status
+    const statusEl = document.getElementById('folder-status');
+    const pathEl = document.getElementById('folder-path');
+    statusEl.style.display = 'block';
+    pathEl.innerHTML = `<span style="color:var(--teal);">&#10003;</span> <strong>${escapeHtml(folderName)}</strong> &mdash; scanning...`;
 
-  try {
-    const prefs = localStorage.getItem('openclaw_preferences');
-    if (prefs) {
-      items.push({
-        id: 'preferences',
-        icon: '⚙️',
-        name: 'Preferences',
-        desc: 'Voice, behavior, and UI preferences',
-        count: 1,
-      });
-    }
-  } catch {}
+    // Scan the directory
+    foundFiles = [];
+    await scanDirectory(dirHandle, '');
 
-  return items;
-}
+    // Update path display
+    pathEl.innerHTML = `<span style="color:var(--teal);">&#10003;</span> <strong>${escapeHtml(folderName)}</strong> &mdash; ${foundFiles.length} file${foundFiles.length !== 1 ? 's' : ''} found`;
 
-function importItem(id, btn) {
-  btn.classList.add('imported');
-  btn.textContent = 'Imported ✓';
-  btn.disabled = true;
+    // Re-label the button
+    const btn = document.getElementById('pick-directory-btn');
+    btn.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+      </svg>
+      Change Folder...
+    `;
 
-  // Store import status
-  chrome.storage?.sync.set({ [`imported_${id}`]: true });
-}
-
-function manualImport() {
-  const url = document.getElementById('import-url')?.value;
-  if (!url) return;
-
-  // Handle import URL
-  if (url.startsWith('http')) {
-    // Would fetch and parse OpenClaw export
-    alert('Import from URL is being processed...');
+    renderFoundFiles();
+  } catch (err) {
+    if (err.name === 'AbortError') return; // User cancelled
+    console.error('[WebClaw] Directory picker error:', err);
+    const pathEl = document.getElementById('folder-path');
+    const statusEl = document.getElementById('folder-status');
+    statusEl.style.display = 'block';
+    pathEl.innerHTML = `<span style="color:var(--danger);">&#10007;</span> Could not open folder: ${escapeHtml(err.message)}`;
   }
 }
 
-// Drag-and-drop for import files
-document.addEventListener('dragover', (e) => { e.preventDefault(); });
-document.addEventListener('drop', (e) => {
-  e.preventDefault();
-  const files = e.dataTransfer?.files;
-  if (files?.length > 0) {
-    for (const file of files) {
-      if (file.name.endsWith('.openclaw') || file.name.endsWith('.json')) {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          try {
-            const data = JSON.parse(ev.target.result);
-            processOpenClawImport(data);
-          } catch (err) {
-            console.error('Import parse error:', err);
-          }
-        };
-        reader.readAsText(file);
+// ── Scan directory for workspace files ───────────────────
+async function scanDirectory(handle, prefix) {
+  // Build a case-insensitive lookup of files we want
+  const wantedMd = {};
+  for (const [name, meta] of Object.entries(WORKSPACE_FILES)) {
+    wantedMd[name.toLowerCase()] = { ...meta, fileName: name };
+  }
+  const wantedJson = {};
+  for (const [name, meta] of Object.entries(CONFIG_FILES)) {
+    wantedJson[name.toLowerCase()] = { ...meta, fileName: name };
+  }
+
+  const subdirs = [];
+
+  for await (const [name, entry] of handle.entries()) {
+    const nameLower = name.toLowerCase();
+
+    if (entry.kind === 'file') {
+      // Check workspace .md files
+      const mdMeta = wantedMd[nameLower];
+      if (mdMeta) {
+        const content = await readFileHandle(entry);
+        if (content !== null) {
+          foundFiles.push({
+            ...mdMeta,
+            path: prefix ? `${prefix}/${name}` : name,
+            content,
+            size: content.length,
+          });
+        }
+        continue;
+      }
+
+      // Check JSON/YAML config files
+      const jsonMeta = wantedJson[nameLower];
+      if (jsonMeta) {
+        const content = await readFileHandle(entry);
+        if (content !== null) {
+          foundFiles.push({
+            ...jsonMeta,
+            path: prefix ? `${prefix}/${name}` : name,
+            content,
+            size: content.length,
+          });
+        }
+        continue;
+      }
+    }
+
+    // Track known sub-directories for deeper scan
+    if (entry.kind === 'directory' && !prefix) {
+      if (nameLower === 'workspace') {
+        // Recurse into workspace/ subdir — files are usually here
+        await scanDirectory(entry, name);
+      } else if (WORKSPACE_DIRS.includes(nameLower)) {
+        subdirs.push({ name, nameLower, entry });
       }
     }
   }
-});
 
-function processOpenClawImport(data) {
-  // Process imported OpenClaw data
-  if (data.skills) {
-    chrome.storage?.sync.set({ imported_skills: data.skills });
+  // Scan known sub-directories (one level)
+  for (const { name, nameLower, entry } of subdirs) {
+    const dirFiles = await collectDirFiles(entry, name);
+    if (dirFiles.length > 0) {
+      // Find a matching workspace file to piggyback on, or create a directory entry
+      const dirLabel = nameLower.charAt(0).toUpperCase() + nameLower.slice(1);
+      const meta = WORKSPACE_FILES[`${nameLower.toUpperCase()}.md`]
+        || WORKSPACE_FILES[`${dirLabel.toUpperCase()}.md`]
+        || { icon: '📁', label: dirLabel, desc: `Contents of ${name}/`, storageKey: `openclaw_dir_${nameLower}` };
+
+      foundFiles.push({
+        icon: meta.icon,
+        label: `${meta.label} (${dirFiles.length} files)`,
+        desc: meta.desc || `Contents of ${name}/`,
+        storageKey: `${meta.storageKey}_dir`,
+        fileName: `${name}/`,
+        path: `${name}/`,
+        content: JSON.stringify(dirFiles, null, 2),
+        size: dirFiles.reduce((s, f) => s + f.size, 0),
+        isDirectory: true,
+        dirFiles,
+      });
+    }
   }
-  if (data.personas) {
-    chrome.storage?.sync.set({ imported_personas: data.personas });
+}
+
+// ── Read a single FileSystemFileHandle → text ────────────
+async function readFileHandle(fileHandle) {
+  try {
+    const file = await fileHandle.getFile();
+    return await file.text();
+  } catch (err) {
+    console.warn(`[WebClaw] Could not read file:`, err);
+    return null;
   }
-  if (data.preferences) {
-    chrome.storage?.sync.set({ imported_preferences: data.preferences });
+}
+
+// ── Collect all text files from a sub-directory (recurses into subdirs) ──
+async function collectDirFiles(dirHandle, dirName) {
+  const files = [];
+  try {
+    for await (const [name, entry] of dirHandle.entries()) {
+      if (entry.kind === 'file') {
+        const ext = name.split('.').pop().toLowerCase();
+        if (['md', 'txt', 'json', 'yaml', 'yml', 'toml'].includes(ext)) {
+          const content = await readFileHandle(entry);
+          if (content !== null) {
+            files.push({ name, path: `${dirName}/${name}`, content, size: content.length });
+          }
+        }
+      } else if (entry.kind === 'directory') {
+        const subFiles = await collectDirFiles(entry, `${dirName}/${name}`);
+        files.push(...subFiles);
+      }
+    }
+  } catch (err) {
+    console.warn(`[WebClaw] Error scanning ${dirName}/:`, err);
   }
-  scanForInstallations(); // Refresh
+  return files;
+}
+
+// ── Render found files ───────────────────────────────────
+function renderFoundFiles() {
+  const card = document.getElementById('import-results-card');
+  const container = document.getElementById('import-list-container');
+  const importAllBtn = document.getElementById('import-all-btn');
+
+  if (foundFiles.length === 0) {
+    card.style.display = 'block';
+    importAllBtn.style.display = 'none';
+    container.innerHTML = `
+      <div class="empty-state" style="padding:16px;">
+        <div class="empty-icon">🤔</div>
+        <p>No recognised OpenClaw workspace files found.<br>
+        Try selecting a different folder.</p>
+      </div>
+    `;
+    return;
+  }
+
+  card.style.display = 'block';
+  importAllBtn.style.display = 'block';
+  container.innerHTML = '';
+
+  const ul = document.createElement('ul');
+  ul.className = 'import-list';
+
+  for (const item of foundFiles) {
+    const li = document.createElement('li');
+    const sizeStr = item.size > 1024
+      ? `${(item.size / 1024).toFixed(1)} KB`
+      : `${item.size} B`;
+
+    li.innerHTML = `
+      <div class="import-info">
+        <div class="import-icon">${item.icon}</div>
+        <div>
+          <div class="import-name">${escapeHtml(item.label)}</div>
+          <div class="import-desc">${escapeHtml(item.path)} &middot; ${sizeStr}</div>
+        </div>
+      </div>
+    `;
+    const btn = document.createElement('button');
+    btn.className = 'import-btn';
+    btn.textContent = 'Import';
+    btn.addEventListener('click', () => importSingleFile(item, btn));
+    li.appendChild(btn);
+    ul.appendChild(li);
+  }
+
+  container.appendChild(ul);
+}
+
+// ── Import a single workspace file ───────────────────────
+async function importSingleFile(item, btn) {
+  btn.textContent = 'Saving...';
+  btn.disabled = true;
+
+  try {
+    let payload;
+    if (item.isDirectory) {
+      payload = item.dirFiles;
+    } else {
+      // Try JSON parse; fall back to raw text
+      try {
+        payload = JSON.parse(item.content);
+      } catch {
+        payload = { content: item.content, format: item.path.split('.').pop() };
+      }
+    }
+
+    await chrome.storage.local.set({ [item.storageKey]: payload });
+    btn.classList.add('imported');
+    btn.textContent = 'Imported ✓';
+    console.log(`[WebClaw] Imported ${item.storageKey} (${item.path})`);
+  } catch (err) {
+    console.error(`[WebClaw] Import failed for ${item.path}:`, err);
+    btn.textContent = 'Failed';
+    btn.disabled = false;
+  }
+}
+
+// ── Import all found files ───────────────────────────────
+async function importAll() {
+  const btn = document.getElementById('import-all-btn');
+  btn.textContent = 'Importing...';
+  btn.disabled = true;
+
+  const toStore = {};
+  let count = 0;
+
+  for (const item of foundFiles) {
+    try {
+      let payload;
+      if (item.isDirectory) {
+        payload = item.dirFiles;
+      } else {
+        try { payload = JSON.parse(item.content); }
+        catch { payload = { content: item.content, format: item.path.split('.').pop() }; }
+      }
+      toStore[item.storageKey] = payload;
+      count++;
+    } catch (err) {
+      console.error(`[WebClaw] Import failed for ${item.path}:`, err);
+    }
+  }
+
+  if (count > 0) {
+    await chrome.storage.local.set(toStore);
+    await chrome.storage.sync.set({ openclawImported: true, openclawImportDate: Date.now() });
+    console.log(`[WebClaw] Bulk imported ${count} items:`, Object.keys(toStore));
+  }
+
+  btn.textContent = `Imported ${count}/${foundFiles.length} ✓`;
+  btn.style.background = 'var(--success)';
+  btn.style.color = 'var(--bg-dark)';
+
+  // Mark individual buttons
+  document.querySelectorAll('#import-list-container .import-btn').forEach(b => {
+    if (!b.classList.contains('imported')) {
+      b.classList.add('imported');
+      b.textContent = 'Imported ✓';
+      b.disabled = true;
+    }
+  });
+}
+
+// ── Test OpenClaw Gateway connection ─────────────────────
+async function testOpenClawGateway() {
+  const url = document.getElementById('openclaw-gateway-url')?.value?.trim();
+  const btn = document.getElementById('test-openclaw-btn');
+  const result = document.getElementById('openclaw-test-result');
+
+  if (!url) {
+    result.textContent = 'Enter a URL first.';
+    result.style.color = 'var(--text-muted)';
+    result.style.display = 'block';
+    return;
+  }
+
+  btn.textContent = 'Testing...';
+  btn.disabled = true;
+  result.style.display = 'block';
+
+  try {
+    // Try common health endpoints
+    const endpoints = ['/health', '/api/health', '/status', '/'];
+    let connected = false;
+
+    for (const ep of endpoints) {
+      try {
+        const resp = await fetch(`${url.replace(/\/+$/, '')}${ep}`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (resp.ok) {
+          const body = await resp.json().catch(() => null);
+          const version = body?.version || body?.v || '';
+          result.textContent = `Connected! ${version ? `(v${version})` : ''}`;
+          result.style.color = 'var(--success)';
+          connected = true;
+
+          // Save URL
+          await chrome.storage.sync.set({ openclawGatewayUrl: url });
+          break;
+        }
+      } catch { /* try next */ }
+    }
+
+    if (!connected) {
+      result.textContent = 'Could not reach gateway. Check the URL.';
+      result.style.color = 'var(--danger)';
+    }
+  } catch (err) {
+    result.textContent = `Error: ${err.message}`;
+    result.style.color = 'var(--danger)';
+  }
+
+  btn.textContent = 'Test Connection';
+  btn.disabled = false;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // =============================================
@@ -363,7 +601,7 @@ function switchConfigTab(tab) {
   document.querySelectorAll('.config-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.config-panel').forEach(p => p.classList.remove('active'));
 
-  const tabBtn = document.querySelector(`.config-tab[onclick*="${tab}"]`);
+  const tabBtn = document.querySelector(`.config-tab[data-config-tab="${tab}"]`);
   const panel = document.getElementById(`panel-${tab}`);
   tabBtn?.classList.add('active');
   panel?.classList.add('active');
@@ -444,7 +682,11 @@ function saveCurrentStepSettings() {
   settings.preferredMic = document.getElementById('mic-select')?.value || '';
   settings.seamlessVoice = document.getElementById('seamless-toggle')?.checked ?? true;
 
-  // Step 2: Gateway
+  // Step 1: OpenClaw Gateway
+  const openclawUrl = document.getElementById('openclaw-gateway-url')?.value?.trim();
+  if (openclawUrl) settings.openclawGatewayUrl = openclawUrl;
+
+  // Step 2: WebClaw Gateway
   settings.gatewayUrl = document.getElementById('gateway-url')?.value || 'http://localhost:8080';
   settings.gatewayApiKey = document.getElementById('gateway-api-key')?.value || '';
   settings.byokProvider = document.getElementById('byok-provider')?.value || 'gemini';
@@ -464,6 +706,9 @@ function loadSettings() {
     }
     if (settings.seamlessVoice !== undefined) {
       document.getElementById('seamless-toggle').checked = settings.seamlessVoice;
+    }
+    if (settings.openclawGatewayUrl) {
+      document.getElementById('openclaw-gateway-url').value = settings.openclawGatewayUrl;
     }
     if (settings.gatewayUrl) {
       document.getElementById('gateway-url').value = settings.gatewayUrl;
@@ -584,12 +829,45 @@ function drawHeaderAvatar() {
 }
 
 // =============================================
-// Init
+// Init — Wire up all event listeners (CSP-safe, no inline handlers)
 // =============================================
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Navigation: next/prev buttons via data-action attributes
+  document.querySelectorAll('[data-action="next"]').forEach(btn => {
+    btn.addEventListener('click', () => nextStep());
+  });
+  document.querySelectorAll('[data-action="prev"]').forEach(btn => {
+    btn.addEventListener('click', () => prevStep());
+  });
+
+  // Config tabs (gateway / byok)
+  document.querySelectorAll('[data-config-tab]').forEach(btn => {
+    btn.addEventListener('click', () => switchConfigTab(btn.dataset.configTab));
+  });
+
+  // API key visibility toggles
+  document.querySelectorAll('[data-toggle-key]').forEach(btn => {
+    btn.addEventListener('click', () => toggleKeyVisibility(btn.dataset.toggleKey));
+  });
+
+  // Test Gateway button
+  document.getElementById('test-gateway-btn')?.addEventListener('click', () => testGateway());
+
+  // Directory picker (File System Access API)
+  document.getElementById('pick-directory-btn')?.addEventListener('click', () => openDirectoryPicker());
+
+  // Import all button
+  document.getElementById('import-all-btn')?.addEventListener('click', () => importAll());
+
+  // OpenClaw gateway test
+  document.getElementById('test-openclaw-btn')?.addEventListener('click', () => testOpenClawGateway());
+
+  // Finish button
+  document.getElementById('finish-btn')?.addEventListener('click', () => finishSetup());
+
+  // Boot
   loadMicrophones();
-  scanForInstallations();
   loadSettings();
   drawHeaderAvatar();
 });
