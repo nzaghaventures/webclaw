@@ -159,14 +159,29 @@ function showSiteForm(config?: SiteConfig): void {
 }
 
 async function saveSite(siteId?: string): Promise<void> {
+  const domain = (document.getElementById('f-domain') as HTMLInputElement).value.trim();
+  const personaName = (document.getElementById('f-name') as HTMLInputElement).value.trim();
+
+  // Validate required fields
+  if (!domain) {
+    toast('Please enter a domain', 'error');
+    (document.getElementById('f-domain') as HTMLInputElement).focus();
+    return;
+  }
+  if (!personaName) {
+    toast('Please enter a persona name', 'error');
+    (document.getElementById('f-name') as HTMLInputElement).focus();
+    return;
+  }
+
   try {
     const body = {
-      domain: (document.getElementById('f-domain') as HTMLInputElement).value,
-      persona_name: (document.getElementById('f-name') as HTMLInputElement).value,
-      persona_voice: (document.getElementById('f-voice') as HTMLInputElement).value,
-      welcome_message: (document.getElementById('f-welcome') as HTMLInputElement).value,
-      knowledge_base: (document.getElementById('f-kb') as HTMLTextAreaElement).value,
-      escalation_email: (document.getElementById('f-email') as HTMLInputElement).value,
+      domain,
+      persona_name: personaName,
+      persona_voice: (document.getElementById('f-voice') as HTMLInputElement).value.trim(),
+      welcome_message: (document.getElementById('f-welcome') as HTMLInputElement).value.trim(),
+      knowledge_base: (document.getElementById('f-kb') as HTMLTextAreaElement).value.trim(),
+      escalation_email: (document.getElementById('f-email') as HTMLInputElement).value.trim(),
       allowed_actions: [...document.querySelectorAll<HTMLInputElement>('.action-cb:checked')].map(cb => cb.value),
       restricted_actions: [...document.querySelectorAll<HTMLInputElement>('.action-cb:not(:checked)')].map(cb => cb.value),
     };

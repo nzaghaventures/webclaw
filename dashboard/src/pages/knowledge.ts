@@ -140,11 +140,23 @@ function showKbForm(docId: string = '', title: string = '', content: string = ''
 }
 
 async function saveKb(docId: string): Promise<void> {
+  const title = (document.getElementById('kb-title') as HTMLInputElement).value.trim();
+  const content = (document.getElementById('kb-content') as HTMLTextAreaElement).value.trim();
+
+  // Validate
+  if (!title) {
+    toast('Please enter a title', 'error');
+    (document.getElementById('kb-title') as HTMLInputElement).focus();
+    return;
+  }
+  if (!content) {
+    toast('Please enter some content', 'error');
+    (document.getElementById('kb-content') as HTMLTextAreaElement).focus();
+    return;
+  }
+
   try {
-    const body = {
-      title: (document.getElementById('kb-title') as HTMLInputElement).value,
-      content: (document.getElementById('kb-content') as HTMLTextAreaElement).value,
-    };
+    const body = { title, content };
     if (docId) {
       await api(`/api/sites/${activeSiteId}/knowledge/${docId}`, { method: 'PUT', body });
       toast('Document updated');
