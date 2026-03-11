@@ -1,4 +1,8 @@
-"""WebClaw Firestore Client: Persistent storage for site configs, sessions, and knowledge bases."""
+"""WebClaw Firestore Client: Persistent storage for site configs, sessions, and knowledge bases.
+
+When Firestore is unavailable (no credentials, emulator, or library), all operations
+fall back to in-memory dicts so that the full dashboard works in local development.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +10,7 @@ import logging
 import os
 import re
 import time
+from collections import defaultdict
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -21,6 +26,16 @@ try:
     _firestore_available = True
 except ImportError:
     logger.info("google-cloud-firestore not installed; using in-memory storage")
+
+# ========================================
+# In-Memory Fallback Storage
+# ========================================
+# These dicts hold data when Firestore is unavailable (local dev, demo mode).
+
+_mem_sites: dict[str, dict] = {}
+_mem_knowledge: dict[str, dict[str, dict]] = defaultdict(dict)   # site_id -> {doc_id -> doc}
+_mem_sessions: dict[str, dict[str, dict]] = defaultdict(dict)    # site_id -> {session_id -> session}
+_mem_stats: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
 
 # ========================================
@@ -114,12 +129,12 @@ def check_health() -> bool:
 
 
 def firestore_get_site(site_id: str) -> dict | None:
-    """Get a site config from Firestore."""
+    """Get a site config from Firestore, falling back to in-memory."""
     try:
         _validate_site_id(site_id)
         db = _get_db()
         if not db:
-            return None
+            return _mem_sites.get(site_id)
         doc = db.collection("sites").document(site_id).get()
         if doc.exists:
             return doc.to_dict()
@@ -133,16 +148,18 @@ def firestore_get_site(site_id: str) -> dict | None:
 
 
 def firestore_set_site(site_id: str, config: dict) -> None:
-    """Store or update a site config in Firestore."""
+    """Store or update a site config in Firestore (falls back to in-memory)."""
     try:
         _validate_site_id(site_id)
         if not isinstance(config, dict):
             raise ValueError("config must be a dictionary")
+        config["updated_at"] = time.time()
+        # Always write to in-memory
+        _mem_sites[site_id] = config
         db = _get_db()
         if not db:
-            logger.warning(f"Firestore not available; skipping save for site {site_id}")
+            logger.info(f"In-memory: site config saved: {site_id}")
             return
-        config["updated_at"] = time.time()
         db.collection("sites").document(site_id).set(config, merge=True)
         logger.info(f"Firestore: site config saved: {site_id}")
     except ValueError as e:
@@ -154,26 +171,28 @@ def firestore_set_site(site_id: str, config: dict) -> None:
 
 
 def firestore_list_sites() -> list[dict]:
-    """List all site configs from Firestore."""
+    """List all site configs from Firestore (falls back to in-memory)."""
     try:
         db = _get_db()
         if not db:
-            return []
+            return list(_mem_sites.values())
         docs = db.collection("sites").stream()
         return [doc.to_dict() for doc in docs]
     except Exception as e:
         logger.error(f"Error listing sites from Firestore: {e}", exc_info=True)
-        return []
+        return list(_mem_sites.values())
 
 
 def firestore_delete_site(site_id: str) -> bool:
-    """Delete a site config from Firestore."""
+    """Delete a site config from Firestore (falls back to in-memory)."""
     try:
         _validate_site_id(site_id)
+        # Always remove from in-memory
+        _mem_sites.pop(site_id, None)
         db = _get_db()
         if not db:
-            logger.warning(f"Firestore not available; skipping delete for site {site_id}")
-            return False
+            logger.info(f"In-memory: site deleted: {site_id}")
+            return True
         db.collection("sites").document(site_id).delete()
         logger.info(f"Firestore: site deleted: {site_id}")
         return True
@@ -197,25 +216,40 @@ def firestore_save_session(
     messages: list[dict],
     metadata: dict | None = None,
 ) -> None:
-    """Save or append to a session's conversation history."""
+    """Save or append to a session's conversation history (falls back to in-memory)."""
     try:
         _validate_site_id(site_id)
         _validate_site_id(session_id)
         if not isinstance(messages, list):
             raise ValueError("messages must be a list")
+
+        now = time.time()
+        session_data: dict[str, Any] = {
+            "user_id": user_id,
+            "site_id": site_id,
+            "session_id": session_id,
+            "updated_at": now,
+        }
+
         db = _get_db()
         if not db:
-            logger.warning(f"Firestore not available; skipping save for session {session_id}")
+            # In-memory fallback
+            existing = _mem_sessions[site_id].get(session_id, {})
+            if existing:
+                existing_messages = existing.get("messages", [])
+                existing_messages.extend(messages)
+                session_data["messages"] = existing_messages
+                session_data["created_at"] = existing.get("created_at", now)
+            else:
+                session_data["created_at"] = now
+                session_data["messages"] = messages
+            if metadata:
+                session_data["metadata"] = metadata
+            _mem_sessions[site_id][session_id] = session_data
             return
 
         doc_ref = db.collection("sites").document(site_id).collection("sessions").document(session_id)
         doc = doc_ref.get()
-
-        session_data: dict[str, Any] = {
-            "user_id": user_id,
-            "site_id": site_id,
-            "updated_at": time.time(),
-        }
 
         if doc.exists:
             existing = doc.to_dict() or {}
@@ -223,13 +257,15 @@ def firestore_save_session(
             existing_messages.extend(messages)
             session_data["messages"] = existing_messages
         else:
-            session_data["created_at"] = time.time()
+            session_data["created_at"] = now
             session_data["messages"] = messages
 
         if metadata:
             session_data["metadata"] = metadata
 
         doc_ref.set(session_data, merge=True)
+        # Also keep in memory
+        _mem_sessions[site_id][session_id] = session_data
     except ValueError as e:
         logger.error(f"Invalid input to firestore_save_session: {e}")
         raise
@@ -239,23 +275,24 @@ def firestore_save_session(
 
 
 def firestore_get_session(site_id: str, session_id: str) -> dict | None:
-    """Get a session's history."""
+    """Get a session's history (falls back to in-memory)."""
     try:
         _validate_site_id(site_id)
         _validate_site_id(session_id)
         db = _get_db()
         if not db:
-            return None
+            return _mem_sessions.get(site_id, {}).get(session_id)
         doc = db.collection("sites").document(site_id).collection("sessions").document(session_id).get()
         if doc.exists:
             return doc.to_dict()
-        return None
+        # Fall back to in-memory
+        return _mem_sessions.get(site_id, {}).get(session_id)
     except ValueError as e:
         logger.error(f"Invalid input to firestore_get_session: {e}")
         raise
     except Exception as e:
         logger.error(f"Error getting session {session_id}: {e}", exc_info=True)
-        return None
+        return _mem_sessions.get(site_id, {}).get(session_id)
 
 
 def firestore_list_sessions(
@@ -263,7 +300,7 @@ def firestore_list_sessions(
     limit: int = 50,
     offset: int = 0,
 ) -> list[dict]:
-    """List recent sessions for a site."""
+    """List recent sessions for a site (falls back to in-memory)."""
     try:
         _validate_site_id(site_id)
         if limit < 1 or limit > 100:
@@ -272,7 +309,10 @@ def firestore_list_sessions(
             raise ValueError("offset must be >= 0")
         db = _get_db()
         if not db:
-            return []
+            # In-memory: sort by updated_at descending
+            sessions = list(_mem_sessions.get(site_id, {}).values())
+            sessions.sort(key=lambda s: s.get("updated_at", 0), reverse=True)
+            return sessions[offset:offset + limit]
 
         query = (
             db.collection("sites")
@@ -288,7 +328,10 @@ def firestore_list_sessions(
         raise
     except Exception as e:
         logger.error(f"Error listing sessions for {site_id}: {e}", exc_info=True)
-        return []
+        # Fall back to in-memory
+        sessions = list(_mem_sessions.get(site_id, {}).values())
+        sessions.sort(key=lambda s: s.get("updated_at", 0), reverse=True)
+        return sessions[:limit]
 
 
 # ========================================
@@ -297,7 +340,7 @@ def firestore_list_sessions(
 
 
 def firestore_set_knowledge(site_id: str, doc_id: str, content: str, title: str = "") -> None:
-    """Store a knowledge base document for a site."""
+    """Store a knowledge base document for a site (falls back to in-memory)."""
     try:
         _validate_site_id(site_id)
         _validate_site_id(doc_id)
@@ -309,16 +352,22 @@ def firestore_set_knowledge(site_id: str, doc_id: str, content: str, title: str 
         if len(title) > 500:
             raise ValueError("title exceeds max length of 500 chars")
 
-        db = _get_db()
-        if not db:
-            logger.warning(f"Firestore not available; skipping save for knowledge {doc_id}")
-            return
-
-        db.collection("sites").document(site_id).collection("knowledge").document(doc_id).set({
+        doc_data = {
             "title": title,
             "content": content,
             "updated_at": time.time(),
-        })
+        }
+
+        # Always write to in-memory
+        _mem_knowledge[site_id][doc_id] = doc_data
+        logger.info(f"Knowledge doc saved (in-memory): {site_id}/{doc_id}")
+
+        db = _get_db()
+        if not db:
+            return
+
+        db.collection("sites").document(site_id).collection("knowledge").document(doc_id).set(doc_data)
+        logger.info(f"Knowledge doc saved (Firestore): {site_id}/{doc_id}")
     except ValueError as e:
         logger.error(f"Invalid input to firestore_set_knowledge: {e}")
         raise
@@ -328,32 +377,50 @@ def firestore_set_knowledge(site_id: str, doc_id: str, content: str, title: str 
 
 
 def firestore_get_knowledge(site_id: str) -> list[dict]:
-    """Get all knowledge base documents for a site."""
+    """Get all knowledge base documents for a site (falls back to in-memory)."""
     try:
         _validate_site_id(site_id)
         db = _get_db()
         if not db:
-            return []
+            # Return from in-memory storage
+            return [
+                {"id": doc_id, **doc_data}
+                for doc_id, doc_data in _mem_knowledge.get(site_id, {}).items()
+            ]
         docs = db.collection("sites").document(site_id).collection("knowledge").stream()
-        return [{"id": doc.id, **doc.to_dict()} for doc in docs]
+        result = [{"id": doc.id, **doc.to_dict()} for doc in docs]
+        # Also include any in-memory docs not in Firestore
+        fs_ids = {d["id"] for d in result}
+        for doc_id, doc_data in _mem_knowledge.get(site_id, {}).items():
+            if doc_id not in fs_ids:
+                result.append({"id": doc_id, **doc_data})
+        return result
     except ValueError as e:
         logger.error(f"Invalid input to firestore_get_knowledge: {e}")
         raise
     except Exception as e:
         logger.error(f"Error getting knowledge for {site_id}: {e}", exc_info=True)
-        return []
+        # Fall back to in-memory
+        return [
+            {"id": doc_id, **doc_data}
+            for doc_id, doc_data in _mem_knowledge.get(site_id, {}).items()
+        ]
 
 
 def firestore_delete_knowledge(site_id: str, doc_id: str) -> bool:
-    """Delete a knowledge base document."""
+    """Delete a knowledge base document (falls back to in-memory)."""
     try:
         _validate_site_id(site_id)
         _validate_site_id(doc_id)
+        # Always remove from in-memory
+        if site_id in _mem_knowledge:
+            _mem_knowledge[site_id].pop(doc_id, None)
         db = _get_db()
         if not db:
-            logger.warning(f"Firestore not available; skipping delete for knowledge {doc_id}")
-            return False
+            logger.info(f"Knowledge doc deleted (in-memory): {site_id}/{doc_id}")
+            return True
         db.collection("sites").document(site_id).collection("knowledge").document(doc_id).delete()
+        logger.info(f"Knowledge doc deleted (Firestore): {site_id}/{doc_id}")
         return True
     except ValueError as e:
         logger.error(f"Invalid input to firestore_delete_knowledge: {e}")
@@ -369,16 +436,19 @@ def firestore_delete_knowledge(site_id: str, doc_id: str) -> bool:
 
 
 def firestore_increment_stats(site_id: str, stat_key: str, amount: int = 1) -> None:
-    """Increment a site analytics counter."""
+    """Increment a site analytics counter (falls back to in-memory)."""
     try:
         _validate_site_id(site_id)
         if not isinstance(stat_key, str) or not stat_key:
             raise ValueError("stat_key must be non-empty string")
         if not isinstance(amount, int):
             raise ValueError("amount must be integer")
+
+        # Always update in-memory
+        _mem_stats[site_id][stat_key] += amount
+
         db = _get_db()
         if not db:
-            logger.warning(f"Firestore not available; skipping stats increment for {site_id}")
             return
 
         doc_ref = db.collection("sites").document(site_id).collection("stats").document("counters")
@@ -391,21 +461,24 @@ def firestore_increment_stats(site_id: str, stat_key: str, amount: int = 1) -> N
         raise
     except Exception as e:
         logger.error(f"Error incrementing stats for {site_id}: {e}", exc_info=True)
-        raise
+        # Already incremented in-memory, so this is ok
 
 
 def firestore_get_stats(site_id: str) -> dict:
-    """Get analytics counters for a site."""
+    """Get analytics counters for a site (falls back to in-memory)."""
     try:
         _validate_site_id(site_id)
         db = _get_db()
         if not db:
-            return {}
+            return dict(_mem_stats.get(site_id, {}))
         doc = db.collection("sites").document(site_id).collection("stats").document("counters").get()
-        return doc.to_dict() or {} if doc.exists else {}
+        if doc.exists:
+            return doc.to_dict() or {}
+        # Fall back to in-memory
+        return dict(_mem_stats.get(site_id, {}))
     except ValueError as e:
         logger.error(f"Invalid input to firestore_get_stats: {e}")
         raise
     except Exception as e:
         logger.error(f"Error getting stats for {site_id}: {e}", exc_info=True)
-        return {}
+        return dict(_mem_stats.get(site_id, {}))
