@@ -8,7 +8,7 @@ IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/webclaw/gateway:latest"
 
 echo "==> Building gateway image..."
 cd "$(dirname "$0")/../gateway"
-docker build -t "${IMAGE}" .
+docker build --platform linux/amd64 -t "${IMAGE}" .
 
 echo "==> Pushing to Artifact Registry..."
 docker push "${IMAGE}"
