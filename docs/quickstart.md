@@ -67,7 +67,7 @@ curl http://127.0.0.1:8081/health
 ```
 
 ```json
-{"status": "ok", "service": "webclaw-gateway"}
+{"status": "ok", "service": "webclaw-gateway", "version": "0.3.0"}
 ```
 
 List registered sites:

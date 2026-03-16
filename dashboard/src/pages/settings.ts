@@ -16,7 +16,7 @@ export async function renderSettings(el: HTMLElement): Promise<void> {
     const base = getApiBase();
     let healthStatus = 'checking...';
     let healthColor = '#64748b';
-    let gatewayVersion = 'v0.2.0';
+    let gatewayVersion = 'v0.3.0';
     let firestoreStatus = 'unknown';
 
     try {
@@ -75,7 +75,7 @@ export async function renderSettings(el: HTMLElement): Promise<void> {
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-top:16px">
           <div>
             <div style="font-size:11px;font-weight:500;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px">Dashboard</div>
-            <p style="font-size:13px;color:var(--text)">v0.2.0</p>
+            <p style="font-size:13px;color:var(--text)">v0.3.0</p>
           </div>
           <div>
             <div style="font-size:11px;font-weight:500;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px">Gateway</div>
