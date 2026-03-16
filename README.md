@@ -195,13 +195,15 @@ The avatar uses real audio analysis when connected to the Web Audio API for accu
 
 ## 🛠 DOM Action Engine
 
-WebClaw's agent can perform 8 categories of DOM operations, each implemented as a Gemini function-calling tool:
+WebClaw's agent can perform 10 categories of DOM operations, each implemented as a Gemini function-calling tool:
 
 | Tool | Description | Example Use Case |
 |:-----|:-----------|:----------------|
 | `click_element` | Click buttons, links, tabs, menu items | "Add this to my cart" |
 | `type_text` | Type into input fields and textareas | "Fill in my email address" |
 | `scroll_to` | Scroll to elements or by pixel amount | "Show me the pricing section" |
+| `scroll_to_top` | Scroll to the very top of the page | "Go back to the top" |
+| `scroll_to_bottom` | Scroll to the very bottom of the page | "Show me the footer" |
 | `navigate_to` | Navigate to URLs within the site | "Go to the contact page" |
 | `highlight_element` | Draw attention with glow border + tooltip | "Where is the search bar?" |
 | `read_page` | Extract text content from elements | "What does this section say?" |
@@ -262,7 +264,7 @@ INFO:     Uvicorn running on http://127.0.0.1:8081
 Verify with:
 ```bash
 curl http://127.0.0.1:8081/health
-# → {"status":"ok","service":"webclaw-gateway"}
+# → {"status":"ok","service":"webclaw-gateway","version":"0.3.0"}
 
 curl http://127.0.0.1:8081/api/sites
 # → {"sites":[{"site_id":"demo","domain":"localhost",...}]}
@@ -309,11 +311,11 @@ Load the extension for Personal Agent mode:
 webclaw/
 │
 ├── gateway/                    # 🐍 Python FastAPI Backend
-│   ├── main.py                 # WebSocket server, REST API, CORS (v0.2.0)
+│   ├── main.py                 # WebSocket server, REST API, CORS (v0.3.0)
 │   ├── agent/                  # ADK Agent Definition
-│   │   ├── agent.py            # Root agent (Gemini 2.0 Flash)
+│   │   ├── agent.py            # Root agent (Gemini 2.5 Flash native audio)
 │   │   ├── prompts.py          # System prompt + site-specific builder
-│   │   └── tools.py            # 8 DOM action tools (function-calling)
+│   │   └── tools.py            # 10 DOM action tools (function-calling)
 │   ├── context/                # Context Broker
 │   │   └── broker.py           # Site config, knowledge base, permissions, session history
 │   ├── storage/                # Persistent Storage
@@ -330,7 +332,7 @@ webclaw/
 │   │   ├── gateway-client.ts   # WebSocket client + event system
 │   │   ├── audio.ts            # Mic capture (16kHz) + playback (24kHz)
 │   │   ├── avatar.ts           # Canvas 2D animated avatar (lip-sync)
-│   │   ├── dom-actions.ts      # DOM action executor (8 operations)
+│   │   ├── dom-actions.ts      # DOM action executor (10 operations)
 │   │   ├── dom-snapshot.ts     # Token-efficient DOM serializer
 │   │   ├── action-visualizer.ts # Bezier flight animation to target elements
 │   │   └── screenshot.ts       # Canvas-based viewport capture for vision
@@ -496,7 +498,7 @@ The gateway has been tested end-to-end with the Gemini Live API:
 
 ```
 ✅ WebSocket connection established
-✅ Gemini Live API bidi stream opened (gemini-2.0-flash-exp-image-generation)
+✅ Gemini Live API bidi stream opened (gemini-2.5-flash-native-audio-preview-12-2025)
 ✅ Session resumption handles received
 ✅ Audio response chunks streaming (PCM 24kHz, ~15KB per chunk)
 ✅ Output transcriptions generated
@@ -525,8 +527,8 @@ EVT: ['turnComplete', ...]
 
 | Component | Technology | Role |
 |:----------|:-----------|:-----|
-| **AI Model** | Gemini 2.0 Flash | Multimodal understanding + function calling |
-| **Agent Framework** | Google ADK v1.26.0 | Agent lifecycle, tool execution, session management |
+| **AI Model** | Gemini 2.5 Flash (Native Audio) | Multimodal understanding + function calling |
+| **Agent Framework** | Google ADK | Agent lifecycle, tool execution, session management |
 | **Voice Streaming** | Gemini Live API | Real-time bidirectional audio (PCM 16kHz ↔ 24kHz) |
 | **Backend** | FastAPI + Uvicorn | Async WebSocket server + REST API |
 | **Embed Script** | TypeScript + esbuild | 26.1KB minified bundle, zero runtime dependencies |
@@ -556,8 +558,8 @@ EVT: ['turnComplete', ...]
 
 | Requirement | Status | Implementation |
 |:------------|:------:|:---------------|
-| Uses a Gemini model | ✅ | `gemini-2.0-flash-exp-image-generation` (bidiGenerateContent) |
-| Uses Google GenAI SDK or ADK | ✅ | Google ADK v1.26.0 (`google-adk`) |
+| Uses a Gemini model | ✅ | `gemini-2.5-flash-native-audio-preview-12-2025` (bidiGenerateContent) |
+| Uses Google GenAI SDK or ADK | ✅ | Google ADK (`google-adk`) |
 | At least one Google Cloud service | ✅ | Cloud Run, Firestore, Artifact Registry |
 | New project created during contest | ✅ | First commit: March 6, 2026 |
 | Demo video < 4 min | 🔲 | Planned |
@@ -577,7 +579,7 @@ EVT: ['turnComplete', ...]
 | Criterion | Weight | How WebClaw Delivers |
 |:----------|:------:|:---------------------|
 | **Innovation & Multimodal UX** | 40% | Breaks the text-box paradigm entirely. Users talk; the agent talks back AND operates the page. Animated avatar with lip-sync, DOM action visualization, voice barge-in support. Not a chatbot with a microphone icon: it is a companion that operates the website. |
-| **Technical Implementation** | 30% | Full ADK agent pipeline with Gemini Live API bidirectional audio, 8-tool DOM action engine, context broker with asymmetric privacy, Shadow DOM isolation, Canvas 2D avatar, smart element finder with CSS/ARIA/text fallback, token-efficient DOM snapshot serializer. |
+| **Technical Implementation** | 30% | Full ADK agent pipeline with Gemini Live API bidirectional audio, 10-tool DOM action engine, context broker with asymmetric privacy, Shadow DOM isolation, Canvas 2D avatar, smart element finder with CSS/ARIA/text fallback, token-efficient DOM snapshot serializer. |
 | **Demo & Presentation** | 30% | Extremely demo-friendly. "Watch the agent navigate to checkout, fill in the form, and complete the purchase: all while explaining what it is doing in natural voice." Visual, live, undeniable. |
 
 ---
@@ -602,7 +604,7 @@ EVT: ['turnComplete', ...]
 - [x] Gateway backend with ADK + Gemini Live API
 - [x] Embed script with Shadow DOM overlay
 - [x] Canvas 2D avatar with lip-sync animation
-- [x] DOM action engine (8 tools)
+- [x] DOM action engine (10 tools)
 - [x] DOM snapshot serializer
 - [x] Chrome extension (Personal Agent)
 - [x] Demo e-commerce site

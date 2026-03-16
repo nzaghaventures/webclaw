@@ -34,7 +34,7 @@ When a Personal Agent visits a WebClaw-integrated site, the Gateway brokers cont
 | **See** | Receives DOM snapshots and screenshots; understands page layout, content, and interactive elements |
 | **Hear** | Captures speech via microphone at 16kHz PCM; streams to Gemini Live API in real-time |
 | **Speak** | Responds with natural voice at 24kHz PCM; supports barge-in (user can interrupt) |
-| **Act** | Executes 8 DOM operations: click, type, scroll, navigate, highlight, read, select, check |
+| **Act** | Executes 10 DOM operations: click, type, scroll, scroll-to-top, scroll-to-bottom, navigate, highlight, read, select, check |
 | **Know** | Answers questions using site-specific knowledge bases configured by site owners |
 | **Remember** | Maintains session context through Firestore; carries personal context via extension |
 

@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, field_validator
+from websockets.exceptions import ConnectionClosedError
 
 # Load environment variables
 load_dotenv(Path(__file__).parent / ".env", override=True)
@@ -57,7 +58,7 @@ logger = logging.getLogger("webclaw.gateway")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
 # ── Model & Client ──────────────────────────────────────────
-WEBCLAW_MODEL = os.environ.get("WEBCLAW_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
+WEBCLAW_MODEL = os.environ.get("WEBCLAW_MODEL", "gemini-2.5-flash-native-audio-latest")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 
 # Build the genai Client (direct SDK — no ADK wrapper)
@@ -162,7 +163,7 @@ rate_limiter = RateLimiter()
 app = FastAPI(
     title="WebClaw Gateway",
     description="Personal Live Agent for Website Operations and Support",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 # ========================================
@@ -771,8 +772,22 @@ async def websocket_endpoint(
     context_input_queue: asyncio.Queue[str] = asyncio.Queue()    # DOM snapshots, negotiate, etc → send_realtime_input
     video_input_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
+    # Shared event: set when the Gemini session is closed/broken
+    session_closed = asyncio.Event()
+
+    # Lock to serialize all sends to the Gemini WebSocket session.
+    # Concurrent sends (audio, text, context, video, tool responses) can
+    # interleave WebSocket frames, causing Gemini to reject with 1008.
+    gemini_send_lock = asyncio.Lock()
+
     # Pending tool calls: maps action_id -> asyncio.Future for browser results
     pending_tool_futures: dict[str, asyncio.Future] = {}
+
+    # Gate for realtime input: cleared during pending tool calls to prevent
+    # Gemini 1008 policy violation (server rejects sendRealtimeInput while
+    # a tool call is awaiting a response).
+    realtime_input_allowed = asyncio.Event()
+    realtime_input_allowed.set()  # Initially allowed
 
     try:
         async with genai_client.aio.live.connect(
@@ -784,70 +799,113 @@ async def websocket_endpoint(
             async def send_audio():
                 try:
                     while True:
+                        if session_closed.is_set():
+                            break
                         chunk = await audio_input_queue.get()
-                        await session.send_realtime_input(
-                            audio=types.Blob(
-                                data=chunk,
-                                mime_type="audio/pcm;rate=16000",
+                        # Skip realtime input while a tool call is pending
+                        if not realtime_input_allowed.is_set():
+                            continue
+                        async with gemini_send_lock:
+                            # Re-check after acquiring lock (flag may have
+                            # been cleared while we waited for the lock)
+                            if not realtime_input_allowed.is_set():
+                                continue
+                            await session.send_realtime_input(
+                                audio=types.Blob(
+                                    data=chunk,
+                                    mime_type="audio/pcm;rate=16000",
+                                )
                             )
-                        )
                 except asyncio.CancelledError:
                     pass
+                except ConnectionClosedError as e:
+                    logger.warning(f"Gemini connection closed during send_audio: {e}")
+                    session_closed.set()
+                except Exception as e:
+                    logger.error(f"Unexpected error in send_audio: {e}")
+                    session_closed.set()
 
             # ── Send user chat messages to Gemini (triggers a response) ──
             async def send_text():
                 try:
                     while True:
+                        if session_closed.is_set():
+                            break
                         text = await text_input_queue.get()
                         logger.info(f"Sending user text to Gemini (client turn): {text[:200]}")
-                        # Use send_client_content so Gemini treats this as a
-                        # conversational turn and generates a response.
-                        await session.send_client_content(
-                            turns=[
-                                types.Content(
-                                    parts=[types.Part(text=text)],
-                                    role="user",
-                                )
-                            ],
-                            turn_complete=True,
-                        )
+                        async with gemini_send_lock:
+                            await session.send_client_content(
+                                turns=[
+                                    types.Content(
+                                        parts=[types.Part(text=text)],
+                                        role="user",
+                                    )
+                                ],
+                                turn_complete=True,
+                            )
                 except asyncio.CancelledError:
                     pass
+                except ConnectionClosedError as e:
+                    logger.warning(f"Gemini connection closed during send_text: {e}")
+                    session_closed.set()
+                except Exception as e:
+                    logger.error(f"Unexpected error in send_text: {e}")
+                    session_closed.set()
 
             # ── Send context (DOM snapshots, negotiate, etc.) without disrupting audio ──
             async def send_context():
                 try:
                     while True:
+                        if session_closed.is_set():
+                            break
                         text = await context_input_queue.get()
                         logger.info(f"Sending context to Gemini: {text[:200]}")
-                        # Use send_client_content with turn_complete=False so it
-                        # adds to conversation history as context without triggering
-                        # a model response or disrupting the audio stream.
-                        await session.send_client_content(
-                            turns=[
-                                types.Content(
-                                    parts=[types.Part(text=text)],
-                                    role="user",
-                                )
-                            ],
-                            turn_complete=False,
-                        )
+                        async with gemini_send_lock:
+                            await session.send_client_content(
+                                turns=[
+                                    types.Content(
+                                        parts=[types.Part(text=text)],
+                                        role="user",
+                                    )
+                                ],
+                                turn_complete=False,
+                            )
                 except asyncio.CancelledError:
                     pass
+                except ConnectionClosedError as e:
+                    logger.warning(f"Gemini connection closed during send_context: {e}")
+                    session_closed.set()
+                except Exception as e:
+                    logger.error(f"Unexpected error in send_context: {e}")
+                    session_closed.set()
 
             # ── Send queued video/images to Gemini ──
             async def send_video():
                 try:
                     while True:
+                        if session_closed.is_set():
+                            break
                         chunk = await video_input_queue.get()
-                        await session.send_realtime_input(
-                            video=types.Blob(
-                                data=chunk,
-                                mime_type="image/jpeg",
+                        # Skip realtime input while a tool call is pending
+                        if not realtime_input_allowed.is_set():
+                            continue
+                        async with gemini_send_lock:
+                            if not realtime_input_allowed.is_set():
+                                continue
+                            await session.send_realtime_input(
+                                video=types.Blob(
+                                    data=chunk,
+                                    mime_type="image/jpeg",
+                                )
                             )
-                        )
                 except asyncio.CancelledError:
                     pass
+                except ConnectionClosedError as e:
+                    logger.warning(f"Gemini connection closed during send_video: {e}")
+                    session_closed.set()
+                except Exception as e:
+                    logger.error(f"Unexpected error in send_video: {e}")
+                    session_closed.set()
 
             # ── Receive from Gemini, forward to client WebSocket ──
             event_queue: asyncio.Queue = asyncio.Queue()
@@ -923,59 +981,77 @@ async def websocket_endpoint(
                             # block session.receive() — blocking it kills the audio stream.
                             if tool_call:
                                 async def _handle_tool_calls(tc):
-                                    function_responses = []
-                                    for fc in tc.function_calls:
-                                        func_name = fc.name
-                                        args = fc.args or {}
-                                        call_id = fc.id or f"{func_name}_{id(fc)}"
+                                    # Block all realtime input while tool call is pending.
+                                    # Gemini rejects sendRealtimeInput during this window
+                                    # with 1008 policy violation.
+                                    realtime_input_allowed.clear()
+                                    try:
+                                        function_responses = []
+                                        for fc in tc.function_calls:
+                                            func_name = fc.name
+                                            args = fc.args or {}
+                                            call_id = fc.id or f"{func_name}_{id(fc)}"
 
-                                        if func_name in TOOL_MAPPING:
-                                            future_obj: asyncio.Future = asyncio.get_running_loop().create_future()
-                                            pending_tool_futures[call_id] = future_obj
+                                            if func_name in TOOL_MAPPING:
+                                                future_obj: asyncio.Future = asyncio.get_running_loop().create_future()
+                                                pending_tool_futures[call_id] = future_obj
 
-                                            logger.info(f"Tool call → browser: {func_name}({args}) id={call_id}")
-                                            await event_queue.put({
-                                                "type": "tool_call",
-                                                "call_id": call_id,
-                                                "name": func_name,
-                                                "args": args,
-                                            })
+                                                logger.info(f"Tool call → browser: {func_name}({args}) id={call_id}")
+                                                await event_queue.put({
+                                                    "type": "tool_call",
+                                                    "call_id": call_id,
+                                                    "name": func_name,
+                                                    "args": args,
+                                                })
 
-                                            try:
-                                                browser_result = await asyncio.wait_for(future_obj, timeout=15.0)
-                                                logger.info(f"Tool result from browser: {call_id} → {str(browser_result)[:200]}")
-                                            except asyncio.TimeoutError:
-                                                browser_result = {"status": "error", "message": "Browser action timed out (15s)"}
-                                                logger.warning(f"Tool call timed out: {call_id}")
-                                            finally:
-                                                pending_tool_futures.pop(call_id, None)
+                                                try:
+                                                    browser_result = await asyncio.wait_for(future_obj, timeout=15.0)
+                                                    logger.info(f"Tool result from browser: {call_id} → {str(browser_result)[:200]}")
+                                                except asyncio.TimeoutError:
+                                                    browser_result = {"status": "error", "message": "Browser action timed out (15s)"}
+                                                    logger.warning(f"Tool call timed out: {call_id}")
+                                                finally:
+                                                    pending_tool_futures.pop(call_id, None)
 
-                                            function_responses.append(
-                                                types.FunctionResponse(
-                                                    name=func_name,
-                                                    id=fc.id,
-                                                    response={"result": browser_result},
+                                                function_responses.append(
+                                                    types.FunctionResponse(
+                                                        name=func_name,
+                                                        id=fc.id,
+                                                        response={"result": browser_result},
+                                                    )
                                                 )
-                                            )
-                                            record_event(site_id, "actions_executed")
-                                        else:
-                                            logger.warning(f"Unknown tool: {func_name}")
-                                            function_responses.append(
-                                                types.FunctionResponse(
-                                                    name=func_name,
-                                                    id=fc.id,
-                                                    response={"error": f"Unknown tool: {func_name}"},
+                                                record_event(site_id, "actions_executed")
+                                            else:
+                                                logger.warning(f"Unknown tool: {func_name}")
+                                                function_responses.append(
+                                                    types.FunctionResponse(
+                                                        name=func_name,
+                                                        id=fc.id,
+                                                        response={"error": f"Unknown tool: {func_name}"},
+                                                    )
                                                 )
-                                            )
 
-                                    logger.info(f"Sending {len(function_responses)} tool response(s) to Gemini")
-                                    await session.send_tool_response(
-                                        function_responses=function_responses
-                                    )
+                                        logger.info(f"Sending {len(function_responses)} tool response(s) to Gemini")
+                                        async with gemini_send_lock:
+                                            await session.send_tool_response(
+                                                function_responses=function_responses
+                                            )
+                                    except ConnectionClosedError as e:
+                                        logger.warning(f"Gemini connection closed while sending tool response: {e}")
+                                        session_closed.set()
+                                    except Exception as e:
+                                        logger.error(f"Error sending tool response to Gemini: {e}")
+                                        session_closed.set()
+                                    finally:
+                                        realtime_input_allowed.set()  # Re-enable realtime input
 
                                 # Fire-and-forget: don't block the receive loop
                                 asyncio.create_task(_handle_tool_calls(tool_call))
 
+                except ConnectionClosedError as e:
+                    logger.warning(f"Gemini connection closed during receive: {e}")
+                    session_closed.set()
+                    await event_queue.put({"type": "error", "error": f"Gemini session closed: {e}"})
                 except Exception as e:
                     await event_queue.put({"type": "error", "error": str(e)})
                 finally:
@@ -1091,6 +1167,12 @@ async def websocket_endpoint(
 
             # Wait for any task to finish (usually receive_from_gemini or receive_from_client)
             done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+            # Retrieve exceptions from done tasks to prevent
+            # "Task exception was never retrieved" warnings
+            for task in done:
+                if task.exception() is not None:
+                    logger.warning(f"Task {task.get_name()} ended with error: {task.exception()}")
 
             # Cancel remaining tasks
             for task in pending:

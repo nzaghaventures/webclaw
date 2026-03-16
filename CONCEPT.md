@@ -218,7 +218,7 @@ The Gateway enforces **asymmetric context sharing**: the site's knowledge flows 
 
 | Component | Technology | Requirement Met |
 |---|---|---|
-| AI Model | **Gemini 2.5 Pro** | Gemini model ✓ |
+| AI Model | **Gemini 2.5 Flash** (Native Audio) | Gemini model ✓ |
 | Agent Framework | **Google ADK** (Agent Development Kit) | GenAI SDK or ADK ✓ |
 | Real-time Voice | **Gemini Live API** | Live API ✓ |
 | Backend Hosting | **Google Cloud Run** | Google Cloud service ✓ |
@@ -232,10 +232,10 @@ The Gateway enforces **asymmetric context sharing**: the site's knowledge flows 
 | **Gateway Backend** | Python (FastAPI) on Cloud Run |
 | **Agent Runtime** | Google ADK + Gemini Live API |
 | **Voice Pipeline** | Gemini Live API (bidirectional audio streaming) |
-| **Embed Script** | Vanilla JS (zero dependencies, <50KB) |
+| **Embed Script** | TypeScript (zero dependencies, 26.1KB minified) |
 | **Browser Extension** | Chrome Extension (Manifest V3) |
 | **Overlay UI** | Web Components (shadow DOM for style isolation) |
-| **Avatar Rendering** | Canvas 2D or Lottie (lip-sync animation) |
+| **Avatar Rendering** | Canvas 2D (lip-sync animation, zero dependencies) |
 | **DOM Interaction** | Custom action engine (click, type, scroll, highlight) |
 | **Knowledge Base** | Firestore + Vertex AI Vector Search |
 | **Site Dashboard** | Next.js on Cloud Run |

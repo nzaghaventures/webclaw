@@ -650,8 +650,8 @@ document.getElementById('byok-provider')?.addEventListener('change', (e) => {
   modelSelect.innerHTML = '';
   const models = {
     gemini: [
-      ['gemini-2.0-flash-exp', 'Gemini 2.0 Flash (Live)'],
-      ['gemini-2.0-pro-exp', 'Gemini 2.0 Pro'],
+      ['gemini-2.5-flash-native-audio-preview-12-2025', 'Gemini 2.5 Flash Native Audio'],
+      ['gemini-2.5-flash-native-audio-latest', 'Gemini 2.5 Flash Native Audio (Latest)'],
     ],
     openai: [
       ['gpt-4o-realtime', 'GPT-4o Realtime'],

@@ -103,8 +103,9 @@ Every site configuration includes explicit action permissions:
 @dataclass
 class SiteConfig:
     allowed_actions: list[str] = [
-        "click", "type", "scroll", "navigate",
-        "highlight", "read", "select", "check",
+        "click", "type", "scroll", "scroll_to_top",
+        "scroll_to_bottom", "navigate", "highlight",
+        "read", "select", "check",
     ]
     restricted_actions: list[str] = []
     max_actions_per_session: int = 100

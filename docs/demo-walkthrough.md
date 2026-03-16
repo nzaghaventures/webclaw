@@ -159,7 +159,7 @@ curl -X PUT http://localhost:8081/api/sites/demo \
     "persona_voice": "enthusiastic, tech-savvy, uses product names",
     "welcome_message": "Welcome to TechByte! I know everything about our products. Try me!",
     "knowledge_base": "Premium electronics store. Best sellers: Smart Watch Ultra ($299.99) and Wireless Headphones Pro ($89.99). We price-match Amazon. Student discount: 15% off with .edu email. Free express shipping on orders over $100.",
-    "allowed_actions": ["click", "type", "scroll", "navigate", "highlight", "read", "select", "check"]
+    "allowed_actions": ["click", "type", "scroll", "scroll_to_top", "scroll_to_bottom", "navigate", "highlight", "read", "select", "check"]
   }'
 ```
 

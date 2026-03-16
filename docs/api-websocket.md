@@ -217,7 +217,7 @@ Every event contains some subset of these fields:
   "partial": true,
   "outputTranscription": "What the agent said (text version)",
   "turnComplete": true,
-  "modelVersion": "gemini-2.0-flash-exp-image-generation",
+  "modelVersion": "gemini-2.5-flash-native-audio-preview-12-2025",
   "usageMetadata": {...},
   "invocationId": "...",
   "author": "webclaw_agent",

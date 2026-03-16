@@ -44,11 +44,11 @@ The gateway's core dependencies:
 
 | Package | Version | Purpose |
 |:--------|:--------|:--------|
-| `google-adk` | 1.26.0 | Agent Development Kit |
-| `google-genai` | 1.66.0 | Google GenAI SDK |
-| `fastapi` | 0.135.1 | Async web framework |
-| `uvicorn` | 0.41.0 | ASGI server |
-| `python-dotenv` | - | Environment variable loading |
+| `google-adk` | ≥0.5.0 | Agent Development Kit |
+| `google-genai` | ≥1.0.0 | Google GenAI SDK |
+| `fastapi` | ≥0.115.0 | Async web framework |
+| `uvicorn` | ≥0.32.0 | ASGI server |
+| `python-dotenv` | ≥1.0.0 | Environment variable loading |
 
 ### Running the Gateway
 
@@ -75,7 +75,7 @@ gateway/
 │   ├── __init__.py
 │   ├── agent.py         # ADK Agent definition (model, tools, prompt)
 │   ├── prompts.py       # System prompt + site-specific prompt builder
-│   └── tools.py         # 8 DOM action tool functions
+│   └── tools.py         # 10 DOM action tool functions
 ├── context/
 │   ├── __init__.py
 │   └── broker.py        # Site config store + context merger
@@ -161,15 +161,16 @@ npx esbuild src/index.ts \
 
 ### Module Architecture
 
-| Module | Lines | Responsibility |
-|:-------|------:|:---------------|
-| `index.ts` | 420 | Main entry, Shadow DOM overlay, UI state machine, event wiring |
-| `avatar.ts` | 225 | Canvas 2D animated face, lip-sync, eye blinks, state animations |
-| `gateway-client.ts` | 147 | WebSocket client, event emitter, message serialization |
-| `audio.ts` | 106 | Mic capture (16kHz PCM), playback (24kHz PCM), Web Audio API |
-| `dom-actions.ts` | 148 | DOM action executor, smart element finder (CSS/ARIA/text) |
-| `dom-snapshot.ts` | 128 | Token-efficient DOM serializer for agent context |
-| `overlay.ts` | 267 | (Legacy) overlay component |
+| Module | Responsibility |
+|:-------|:---------------|
+| `index.ts` | Main entry, Shadow DOM overlay, UI state machine, event wiring |
+| `avatar.ts` | Canvas 2D animated face, lip-sync, eye blinks, state animations |
+| `gateway-client.ts` | WebSocket client, event emitter, message serialization |
+| `audio.ts` | Mic capture (16kHz PCM), playback (24kHz PCM), Web Audio API |
+| `dom-actions.ts` | DOM action executor, smart element finder (CSS/ARIA/text) |
+| `dom-snapshot.ts` | Token-efficient DOM serializer for agent context |
+| `element-finder.ts` | 3-strategy element lookup (CSS → ARIA → text content) |
+| `overlay.ts` | (Legacy) overlay component |
 
 ### Bundle Analysis
 
@@ -249,7 +250,7 @@ A successful end-to-end test produces this pattern:
 ```
 Gateway logs:
   WebSocket connect: site=demo session=test456
-  Trying to connect to live model: gemini-2.0-flash-exp-image-generation
+    Trying to connect to live model: gemini-2.5-flash-native-audio-preview-12-2025
   Update session resumption handle: new_handle=...
 
 Client receives:

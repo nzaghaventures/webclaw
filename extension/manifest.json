@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "WebClaw - Personal Live Agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Your personal AI agent that works on any website. Voice-first, seamless, action-capable.",
   "permissions": [
     "activeTab",

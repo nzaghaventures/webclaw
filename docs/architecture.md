@@ -49,7 +49,7 @@ WebClaw follows a **Gateway architecture** where a central server mediates all c
           │         (bidiGenerateContent)                     │  
           │                                                   │  
           │  Native audio generation + function calling       │  
-          │  Model: gemini-2.0-flash-exp-image-generation    │  
+          │  Model: gemini-2.5-flash-native-audio-preview    │  
           └──────────────────────────────────────────────────┘  
 ```
 
@@ -57,7 +57,7 @@ WebClaw follows a **Gateway architecture** where a central server mediates all c
 
 ### Gateway (`gateway/main.py`)
 
-The gateway is a **FastAPI** application (v0.2.0) serving four roles:
+The gateway is a **FastAPI** application (v0.3.0) serving four roles:
 
 1. **REST API server** for site configuration CRUD, knowledge base management, session history, and analytics
 2. **WebSocket server** for real-time bidirectional streaming between the browser and the Gemini Live API via ADK
@@ -99,7 +99,7 @@ The agent is defined using Google ADK's `Agent` class:
 ```python
 root_agent = Agent(
     name="webclaw_agent",
-    model="gemini-2.0-flash-exp-image-generation",
+    model="gemini-2.5-flash-native-audio-preview-12-2025",
     description="A live website operations agent...",
     instruction=WEBCLAW_SYSTEM_PROMPT,
     tools=DOM_TOOLS,
@@ -110,13 +110,13 @@ root_agent = Agent(
 
 | Model | bidiGenerateContent | generateContent | Notes |
 |:------|:---:|:---:|:------|
-| `gemini-2.0-flash-exp-image-generation` | ✅ | ✅ | Current default; broadest capability |
-| `gemini-2.5-flash-native-audio-latest` | ✅ | ❌ | Audio-only; higher voice quality |
-| `gemini-2.5-flash-native-audio-preview-*` | ✅ | ❌ | Preview variants |
+| `gemini-2.5-flash-native-audio-preview-12-2025` | ✅ | ❌ | Current default; native audio with function calling |
+| `gemini-2.5-flash-native-audio-latest` | ✅ | ❌ | Tracks latest stable native-audio model |
+| `gemini-2.0-flash-exp-image-generation` | ✅ | ✅ | Legacy; broadest capability but older |
 
 **System prompt:** The agent's system prompt (`agent/prompts.py`) defines its identity, behavioral guidelines, capabilities, and rules. Site-specific context (persona, knowledge base, permissions) is appended dynamically by the `build_site_prompt()` function.
 
-**Tools:** Eight DOM action tools are registered as Python functions with typed signatures. ADK automatically converts these to Gemini function-calling schemas. When the model invokes a tool, the return value (a dict with `action`, `selector`, `status`) is serialized and sent to the browser for execution.
+**Tools:** Ten DOM action tools are registered as Python functions with typed signatures. ADK automatically converts these to Gemini function-calling schemas. When the model invokes a tool, the return value (a dict with `action`, `selector`, `status`) is serialized and sent to the browser for execution.
 
 ### Context Broker (`gateway/context/broker.py`)
 
@@ -158,13 +158,14 @@ The embed script is a TypeScript application bundled with esbuild into a single 
 | Module | Responsibility | Size |
 |:-------|:---------------|:-----|
 | `index.ts` | Main entry, Shadow DOM overlay, UI state machine | ~450 lines |
-| `avatar.ts` | Canvas 2D animated face, lip-sync, state animations | 225 lines |
-| `gateway-client.ts` | WebSocket client, event system, reconnection | 160 lines |
-| `audio.ts` | Mic capture (16kHz), playback (24kHz), Web Audio API | 106 lines |
-| `dom-actions.ts` | DOM action executor, smart element finder | 148 lines |
-| `dom-snapshot.ts` | Token-efficient DOM serializer | 128 lines |
-| `action-visualizer.ts` | Bezier flight animation from FAB to target elements | 223 lines |
-| `screenshot.ts` | Canvas-based viewport capture for vision context | 213 lines |
+| `avatar.ts` | Canvas 2D animated face, lip-sync, state animations | ~225 lines |
+| `gateway-client.ts` | WebSocket client, event system, reconnection | ~160 lines |
+| `audio.ts` | Mic capture (16kHz), playback (24kHz), Web Audio API | ~106 lines |
+| `dom-actions.ts` | DOM action executor, smart element finder | ~148 lines |
+| `dom-snapshot.ts` | Token-efficient DOM serializer | ~128 lines |
+| `element-finder.ts` | 3-strategy element lookup (CSS → ARIA → text) | ~90 lines |
+| `action-visualizer.ts` | Bezier flight animation from FAB to target elements | ~223 lines |
+| `screenshot.ts` | Canvas-based viewport capture for vision context | ~213 lines |
 
 **Shadow DOM isolation:** The overlay is wrapped in a `<webclaw-overlay>` custom element with a **closed** Shadow DOM. This provides complete CSS isolation in both directions: WebClaw styles never leak out, host page styles never leak in. This is critical for an embed script that must work on any website regardless of CSS framework.
 

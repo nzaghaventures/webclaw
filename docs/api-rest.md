@@ -29,7 +29,7 @@ Returns the gateway's health status. Used by Cloud Run for liveness probes.
 {
   "status": "ok",
   "service": "webclaw-gateway",
-  "version": "0.2.0"
+  "version": "0.3.0"
 }
 ```
 
@@ -89,7 +89,7 @@ Register a new site with WebClaw. Returns a generated `site_id`.
 | `persona_voice` | string | | `"friendly and helpful"` | Voice style guidance |
 | `welcome_message` | string | | `"Hi! I'm here to help."` | First message on connect |
 | `knowledge_base` | string | | `""` | Site-specific knowledge for agent context |
-| `allowed_actions` | string[] | | all 8 actions | Permitted DOM operations |
+| `allowed_actions` | string[] | | all 10 actions | Permitted DOM operations |
 | `restricted_actions` | string[] | | `[]` | Explicitly blocked DOM operations |
 | `escalation_email` | string | | `""` | Email for human handoff |
 

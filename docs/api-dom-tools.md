@@ -1,6 +1,6 @@
 # DOM Tools Reference
 
-WebClaw's agent uses eight DOM action tools registered as Gemini function-calling functions. When the agent decides to take an action on the page, it returns a `functionCall` part in its response. The client (embed script or Chrome extension) executes the action and sends the result back.
+WebClaw's agent uses ten DOM action tools registered as Gemini function-calling functions. When the agent decides to take an action on the page, it returns a `functionCall` part in its response. The client (embed script or Chrome extension) executes the action and sends the result back.
 
 ## Tool Overview
 
@@ -9,6 +9,8 @@ WebClaw's agent uses eight DOM action tools registered as Gemini function-callin
 | [`click_element`](#click_element) | Click buttons, links, tabs, menu items | 🟡 Medium |
 | [`type_text`](#type_text) | Type into input fields and textareas | 🔴 High |
 | [`scroll_to`](#scroll_to) | Scroll to elements or by pixel amount | 🟢 Low |
+| [`scroll_to_top`](#scroll_to_top) | Scroll to the very top of the page | 🟢 Low |
+| [`scroll_to_bottom`](#scroll_to_bottom) | Scroll to the very bottom of the page | 🟢 Low |
 | [`navigate_to`](#navigate_to) | Navigate to URLs within the site | 🟡 Medium |
 | [`highlight_element`](#highlight_element) | Draw visual attention to elements | 🟢 Low |
 | [`read_page`](#read_page) | Extract text content from elements | 🟢 Low |
@@ -98,6 +100,62 @@ Scroll the page or scroll to a specific element.
 **Behavior:**
 - If `selector` is provided: uses `element.scrollIntoView({ behavior: 'smooth', block: 'center' })`
 - If `selector` is empty: uses `window.scrollBy(0, amount)` (negative for up)
+
+---
+
+### `scroll_to_top`
+
+Scroll the page to the very top.
+
+**Parameters:** None
+
+**Return value:**
+
+```json
+{
+  "action": "scroll_to_top",
+  "status": "pending"
+}
+```
+
+**Example agent invocation:**
+
+```json
+{
+  "functionCall": {
+    "name": "scroll_to_top",
+    "args": {}
+  }
+}
+```
+
+---
+
+### `scroll_to_bottom`
+
+Scroll the page to the very bottom.
+
+**Parameters:** None
+
+**Return value:**
+
+```json
+{
+  "action": "scroll_to_bottom",
+  "status": "pending"
+}
+```
+
+**Example agent invocation:**
+
+```json
+{
+  "functionCall": {
+    "name": "scroll_to_bottom",
+    "args": {}
+  }
+}
+```
 
 ---
 
