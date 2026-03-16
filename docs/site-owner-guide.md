@@ -83,7 +83,7 @@ That is it. WebClaw will appear on your site for all visitors.
 | `persona_voice` | string | `"friendly and helpful"` | Voice style guidance for the model |
 | `welcome_message` | string | `"Hi! I'm here to help."` | First message when user connects |
 | `knowledge_base` | string | `""` | Site-specific knowledge (see below) |
-| `allowed_actions` | string[] | all 8 actions | DOM actions the agent may perform |
+| `allowed_actions` | string[] | all 10 actions | DOM actions the agent may perform |
 | `restricted_actions` | string[] | `[]` | DOM actions explicitly blocked |
 | `escalation_email` | string | `""` | Email for human handoff |
 | `max_actions_per_session` | int | `100` | Rate limit for DOM actions per session |
@@ -147,13 +147,15 @@ curl -X PUT https://your-gateway.run.app/api/sites/a1b2c3d4 \
 
 ## Action Permissions
 
-Control what the agent can do on your site. The eight available actions:
+Control what the agent can do on your site. The ten available actions:
 
 | Action | What It Does | Risk Level | Recommended |
 |:-------|:-------------|:----------:|:-----------:|
 | `read` | Extract text from elements | 🟢 Low | ✅ Always allow |
 | `highlight` | Draw attention to elements | 🟢 Low | ✅ Always allow |
 | `scroll` | Scroll to elements or by amount | 🟢 Low | ✅ Always allow |
+| `scroll_to_top` | Scroll to the very top of the page | 🟢 Low | ✅ Always allow |
+| `scroll_to_bottom` | Scroll to the very bottom of the page | 🟢 Low | ✅ Always allow |
 | `navigate` | Navigate to URLs within site | 🟡 Medium | ✅ Usually allow |
 | `click` | Click buttons, links, tabs | 🟡 Medium | ✅ Usually allow |
 | `select` | Choose dropdown options | 🟡 Medium | Case-by-case |
@@ -290,7 +292,7 @@ Example log output:
 
 ```
 2026-03-06 15:30:11 - webclaw.gateway - INFO - WebSocket connect: site=demo session=test456
-2026-03-06 15:30:12 - google_adk... - INFO - Trying to connect to live model: gemini-2.0-flash-exp-image-generation
+2026-03-06 15:30:12 - google_adk... - INFO - Trying to connect to live model: gemini-2.5-flash-native-audio-preview-12-2025
 2026-03-06 15:31:05 - webclaw.gateway - INFO - Session ended: test456
 ```
 

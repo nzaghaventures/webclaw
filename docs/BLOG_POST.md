@@ -33,7 +33,7 @@ There's also a Chrome Extension mode (Personal Agent) that works on *any* websit
 
 The entire project hinges on Gemini's `bidiGenerateContent` method. This isn't request-response; it's a persistent bidirectional stream. Audio flows in both directions simultaneously. The user can interrupt the agent mid-sentence (barge-in). The agent can call functions while speaking.
 
-We use `gemini-2.0-flash-exp-image-generation` because it supports both `bidiGenerateContent` (for live audio) and `generateContent` (for vision/screenshots). One model, two modalities.
+We use `gemini-2.5-flash-native-audio-preview-12-2025` because it supports `bidiGenerateContent` for live audio with native voice generation and function calling. The native audio model produces higher-quality, more natural voice output than the older experimental models.
 
 ### Google ADK: Agent Scaffolding
 
@@ -42,13 +42,13 @@ The Agent Development Kit handles the ceremony: session management, function-cal
 ```python
 root_agent = Agent(
     name="webclaw_agent",
-    model="gemini-2.0-flash-exp-image-generation",
+    model="gemini-2.5-flash-native-audio-preview-12-2025",
     instruction=WEBCLAW_SYSTEM_PROMPT,
     tools=DOM_TOOLS,
 )
 ```
 
-Eight DOM tools are registered as typed Python functions. ADK converts them to Gemini function-calling schemas automatically. When the model decides to click a button, it returns a `function_call` event that we forward to the browser for execution.
+Ten DOM tools are registered as typed Python functions. ADK converts them to Gemini function-calling schemas automatically. When the model decides to click a button, it returns a `function_call` event that we forward to the browser for execution.
 
 ### The Gateway: FastAPI + WebSocket
 
@@ -85,15 +85,15 @@ We chose esbuild for bundling: 2ms build time, zero config. The avatar uses Canv
 
 ### The Model Migration
 
-We started development targeting `gemini-2.0-flash-live-001`. Midway through, we discovered it no longer exists in the API. We queried every available model for `bidiGenerateContent` support and found three options:
+We started development targeting `gemini-2.0-flash-live-001`. Midway through, we discovered it no longer exists in the API. We queried every available model for `bidiGenerateContent` support and found several options:
 
 | Model                                       | bidi | generate | Notes                            |
 | ------------------------------------------- | ---- | -------- | -------------------------------- |
-| `gemini-2.0-flash-exp-image-generation`   | ✅   | ✅       | Broadest capability              |
-| `gemini-2.5-flash-native-audio-latest`    | ✅   | ❌       | Higher voice quality, audio-only |
-| `gemini-2.5-flash-native-audio-preview-*` | ✅   | ❌       | Preview variants                 |
+| `gemini-2.5-flash-native-audio-preview-12-2025` | ✅   | ❌       | Current default; native audio with function calling |
+| `gemini-2.5-flash-native-audio-latest`    | ✅   | ❌       | Tracks latest stable native-audio model |
+| `gemini-2.0-flash-exp-image-generation`   | ✅   | ✅       | Legacy; broadest capability but older |
 
-We chose the first for its dual capability: live audio streaming *and* vision (screenshot understanding) through the same model.
+We chose the native audio model for its superior voice quality and lower latency in real-time conversations.
 
 ### Token-Efficient DOM Serialization
 

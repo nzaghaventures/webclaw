@@ -9,7 +9,7 @@ Run these checks to identify the problem:
 ```bash
 # 1. Is the gateway running?
 curl http://127.0.0.1:8081/health
-# Expected: {"status":"ok","service":"webclaw-gateway"}
+# Expected: {"status":"ok","service":"webclaw-gateway","version":"0.3.0"}
 
 # 2. Is the API key set?
 grep GOOGLE_API_KEY gateway/.env
@@ -80,10 +80,9 @@ python -c "from main import app; print('OK')"
 
 | Model | `bidiGenerateContent` | `generateContent` |
 |:------|:---------------------:|:------------------:|
-| `gemini-2.0-flash-exp-image-generation` | ✅ | ✅ |
-| `gemini-2.5-flash-native-audio-latest` | ✅ | ❌ |
-| `gemini-2.5-flash-native-audio-preview-09-2025` | ✅ | ❌ |
 | `gemini-2.5-flash-native-audio-preview-12-2025` | ✅ | ❌ |
+| `gemini-2.5-flash-native-audio-latest` | ✅ | ❌ |
+| `gemini-2.0-flash-exp-image-generation` | ✅ | ✅ |
 
 To check available models programmatically:
 
@@ -256,7 +255,7 @@ Yes. The embed script supports text-only mode. Users can type in the chat panel 
 
 ### How much does the Gemini API cost?
 
-Gemini API pricing varies by model and usage. Check [Google AI pricing](https://ai.google.dev/pricing) for current rates. The `gemini-2.0-flash` family is generally the most cost-effective for real-time applications.
+Gemini API pricing varies by model and usage. Check [Google AI pricing](https://ai.google.dev/pricing) for current rates. The `gemini-2.5-flash` family is generally the most cost-effective for real-time applications.
 
 ### Can I self-host without GCP?
 

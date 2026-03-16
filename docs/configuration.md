@@ -16,7 +16,7 @@ Site configurations define how the WebClaw agent behaves on a specific website. 
 | `persona_voice` | string | `"friendly and helpful"` | Natural language description of the agent's voice style |
 | `welcome_message` | string | `"Hi! I'm here to help."` | First message spoken when a user opens the panel |
 | `knowledge_base` | string | `""` | Freeform text: FAQs, product info, policies, documentation |
-| `allowed_actions` | string[] | All 8 actions | DOM operations the agent may perform |
+| `allowed_actions` | string[] | All 10 actions | DOM operations the agent may perform |
 | `restricted_actions` | string[] | `[]` | DOM operations explicitly blocked (overrides allowed) |
 | `escalation_email` | string | `""` | Email for human support handoff |
 | `max_actions_per_session` | integer | `100` | Maximum DOM actions per WebSocket session |
@@ -30,6 +30,8 @@ The `allowed_actions` and `restricted_actions` fields accept these values:
 | `"click"` | Click elements (buttons, links, tabs) |
 | `"type"` | Type text into inputs |
 | `"scroll"` | Scroll to elements or by amount |
+| `"scroll_to_top"` | Scroll to the very top of the page |
+| `"scroll_to_bottom"` | Scroll to the very bottom of the page |
 | `"navigate"` | Navigate to URLs |
 | `"highlight"` | Highlight elements with visual effect |
 | `"read"` | Extract text content |
@@ -70,7 +72,7 @@ The `allowed_actions` and `restricted_actions` fields accept these values:
   "persona_name": "AppAssist",
   "persona_voice": "professional, patient, explains step by step",
   "knowledge_base": "Feature docs, keyboard shortcuts, common workflows...",
-  "allowed_actions": ["click", "type", "scroll", "navigate", "highlight", "read", "select", "check"],
+  "allowed_actions": ["click", "type", "scroll", "navigate", "highlight", "read", "select", "check", "scroll_to_top", "scroll_to_bottom"],
   "max_actions_per_session": 200
 }
 ```
@@ -164,8 +166,8 @@ The agent is instantiated in `gateway/agent/agent.py`:
 | Parameter | Value | Description |
 |:----------|:------|:------------|
 | `name` | `"webclaw_agent"` | Agent identifier in ADK |
-| `model` | `"gemini-2.0-flash-exp-image-generation"` | Must support `bidiGenerateContent` |
-| `tools` | `DOM_TOOLS` (8 functions) | Available DOM actions |
+| `model` | `"gemini-2.5-flash-native-audio-preview-12-2025"` | Must support `bidiGenerateContent` |
+| `tools` | `DOM_TOOLS` (10 functions) | Available DOM actions |
 | `instruction` | `WEBCLAW_SYSTEM_PROMPT` | Core system prompt |
 
 ### RunConfig (WebSocket Sessions)
